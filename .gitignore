@@ -1,3 +1,18 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.csproj.user
+.vs/
+
+# Godot .NET
+.mono/
+
+# Build
+build/
+export/

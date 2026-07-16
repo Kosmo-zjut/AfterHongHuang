@@ -1,0 +1,51 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/DeckDisplayController.cs" id="1_dd"]
+
+[node name="DeckDisplay" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dd")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1152.0
+offset_bottom = 648.0
+color = Color(0.08, 0.06, 0.12, 1)
+
+[node name="TitleLabel" type="RichTextLabel" parent="."]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 30.0
+offset_right = 952.0
+offset_bottom = 80.0
+bbcode_enabled = true
+
+[node name="CardGrid" type="FlowContainer" parent="."]
+layout_mode = 0
+offset_left = 100.0
+offset_top = 100.0
+offset_right = 1052.0
+offset_bottom = 480.0
+
+[node name="InfoLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 400.0
+offset_top = 500.0
+offset_right = 752.0
+offset_bottom = 530.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 20
+
+[node name="DoneBtn" type="Button" parent="."]
+layout_mode = 0
+offset_left = 476.0
+offset_top = 550.0
+offset_right = 676.0
+offset_bottom = 600.0
+text = "验证完成 - 返回标题"
+theme_override_font_sizes/font_size = 18

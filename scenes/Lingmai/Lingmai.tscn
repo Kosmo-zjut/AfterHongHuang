@@ -1,0 +1,82 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/LingmaiController.cs" id="1_lingmai"]
+[ext_resource type="Script" path="res://scripts/UI/TopBar.cs" id="2_topbar"]
+
+[node name="Lingmai" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_lingmai")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.06, 0.05, 0.08, 1)
+
+[node name="ContentPanel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 560.0
+offset_top = 140.0
+offset_right = 1360.0
+offset_bottom = 940.0
+
+[node name="TitleLabel" type="Label" parent="ContentPanel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 28.0
+offset_right = 780.0
+offset_bottom = 78.0
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.55, 0.9, 0.62, 1)
+theme_override_font_sizes/font_size = 30
+text = "灵脉节点"
+
+[node name="DescriptionLabel" type="Label" parent="ContentPanel"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 88.0
+offset_right = 740.0
+offset_bottom = 126.0
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.76, 0.72, 0.62, 1)
+theme_override_font_sizes/font_size = 16
+text = ""
+
+[node name="OptionScroll" type="ScrollContainer" parent="ContentPanel"]
+layout_mode = 0
+offset_left = 120.0
+offset_top = 150.0
+offset_right = 680.0
+offset_bottom = 650.0
+
+[node name="OptionContainer" type="VBoxContainer" parent="ContentPanel/OptionScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="ResultLabel" type="Label" parent="ContentPanel"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 690.0
+offset_right = 740.0
+offset_bottom = 735.0
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.78, 0.68, 0.34, 1)
+theme_override_font_sizes/font_size = 15
+text = ""
+
+[node name="TopBar" type="Control" parent="."]
+layout_mode = 0
+offset_right = 1920.0
+offset_bottom = 44.0
+mouse_filter = 1
+script = ExtResource("2_topbar")

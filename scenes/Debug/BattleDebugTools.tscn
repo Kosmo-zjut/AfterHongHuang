@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/Debug/BattleDebugToolsController.cs" id="1_debug_tools"]
+
+[node name="BattleDebugTools" type="Panel"]
+offset_left = 1620.0
+offset_top = 56.0
+offset_right = 1900.0
+offset_bottom = 112.0
+mouse_filter = 1
+script = ExtResource("1_debug_tools")
+
+[node name="InstantVictoryButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 272.0
+offset_bottom = 48.0
+text = "Debug：一键胜利"

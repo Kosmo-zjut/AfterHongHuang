@@ -1,0 +1,226 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/CharacterSelectController.cs" id="1_char"]
+
+[node name="CharacterSelect" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_char")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1920.0
+offset_bottom = 1080.0
+color = Color(0.1, 0.08, 0.12, 1)
+
+[node name="BackBtn" type="Button" parent="."]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 110.0
+offset_bottom = 52.0
+text = "← 返回"
+theme_override_font_sizes/font_size = 18
+
+[node name="TitleLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 700.0
+offset_top = 20.0
+offset_right = 1220.0
+offset_bottom = 70.0
+text = "选 择 角 色"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 36
+theme_override_colors/font_color = Color(0.9, 0.7, 0.3, 1)
+
+[node name="InfoPanel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 1340.0
+offset_top = 90.0
+offset_right = 1760.0
+offset_bottom = 480.0
+
+[node name="NameLabel" type="Label" parent="InfoPanel"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 15.0
+offset_right = 400.0
+offset_bottom = 50.0
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.9, 0.7, 0.3, 1)
+
+[node name="InfoLabel" type="RichTextLabel" parent="InfoPanel"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 60.0
+offset_right = 400.0
+offset_bottom = 220.0
+bbcode_enabled = true
+fit_content = true
+
+[node name="DeckPreviewLabel" type="Label" parent="InfoPanel"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 230.0
+offset_right = 400.0
+offset_bottom = 260.0
+
+[node name="HpLabel" type="Label" parent="InfoPanel"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 230.0
+offset_right = 400.0
+offset_bottom = 260.0
+
+[node name="StartBtn" type="Button" parent="."]
+layout_mode = 0
+offset_left = 1410.0
+offset_top = 610.0
+offset_right = 1690.0
+offset_bottom = 670.0
+text = "开始游戏 >>"
+theme_override_font_sizes/font_size = 22
+
+[node name="AvatarContainer" type="HBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 335.0
+offset_top = 700.0
+offset_right = 1585.0
+offset_bottom = 800.0
+theme_override_constants/separation = 15
+
+[node name="Avatar1" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar1"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar1"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Avatar2" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar2"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar2"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Avatar3" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar3"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar3"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Avatar4" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar4"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar4"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Avatar5" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar5"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar5"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24
+
+[node name="Avatar6" type="Button" parent="AvatarContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(180, 100)
+
+[node name="NameLabel" type="Label" parent="AvatarContainer/Avatar6"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 10.0
+offset_right = 165.0
+offset_bottom = 40.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="StatusLabel" type="Label" parent="AvatarContainer/Avatar6"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 45.0
+offset_right = 120.0
+offset_bottom = 90.0
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 24

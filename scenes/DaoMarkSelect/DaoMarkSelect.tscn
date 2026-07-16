@@ -1,0 +1,163 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/DaoMarkSelectController.cs" id="1_dm"]
+
+[node name="DaoMarkSelect" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dm")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1920.0
+offset_bottom = 1080.0
+color = Color(0.08, 0.06, 0.15, 1)
+
+; === 道痕面板 ===
+[node name="DaoMarkPanel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 1900.0
+offset_bottom = 1060.0
+
+[node name="MapToggleBtn" type="Button" parent="DaoMarkPanel"]
+layout_mode = 0
+offset_left = 1740.0
+offset_top = 10.0
+offset_right = 1880.0
+offset_bottom = 50.0
+text = "🗺 地图"
+theme_override_font_sizes/font_size = 16
+
+[node name="TitleLabel" type="RichTextLabel" parent="DaoMarkPanel"]
+layout_mode = 0
+offset_left = 360.0
+offset_top = 50.0
+offset_right = 1560.0
+offset_bottom = 100.0
+bbcode_enabled = true
+
+[node name="CardContainer" type="HBoxContainer" parent="DaoMarkPanel"]
+layout_mode = 0
+offset_left = 76.0
+offset_top = 130.0
+offset_right = 1844.0
+offset_bottom = 950.0
+theme_override_constants/separation = 30
+
+[node name="Card1" type="Panel" parent="DaoMarkPanel/CardContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DescLabel" type="RichTextLabel" parent="DaoMarkPanel/CardContainer/Card1"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 570.0
+offset_bottom = 680.0
+bbcode_enabled = true
+fit_content = true
+
+[node name="SelectBtn" type="Button" parent="DaoMarkPanel/CardContainer/Card1"]
+layout_mode = 0
+offset_left = 190.0
+offset_top = 720.0
+offset_right = 390.0
+offset_bottom = 760.0
+text = "固 化"
+theme_override_font_sizes/font_size = 18
+
+[node name="Card2" type="Panel" parent="DaoMarkPanel/CardContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DescLabel" type="RichTextLabel" parent="DaoMarkPanel/CardContainer/Card2"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 570.0
+offset_bottom = 680.0
+bbcode_enabled = true
+fit_content = true
+
+[node name="SelectBtn" type="Button" parent="DaoMarkPanel/CardContainer/Card2"]
+layout_mode = 0
+offset_left = 190.0
+offset_top = 720.0
+offset_right = 390.0
+offset_bottom = 760.0
+text = "固 化"
+theme_override_font_sizes/font_size = 18
+
+[node name="Card3" type="Panel" parent="DaoMarkPanel/CardContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DescLabel" type="RichTextLabel" parent="DaoMarkPanel/CardContainer/Card3"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 570.0
+offset_bottom = 680.0
+bbcode_enabled = true
+fit_content = true
+
+[node name="SelectBtn" type="Button" parent="DaoMarkPanel/CardContainer/Card3"]
+layout_mode = 0
+offset_left = 190.0
+offset_top = 720.0
+offset_right = 390.0
+offset_bottom = 760.0
+text = "固 化"
+theme_override_font_sizes/font_size = 18
+
+; === 地图面板 ===
+[node name="MapPanel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 1900.0
+offset_bottom = 1060.0
+visible = false
+
+[node name="DaoMarkToggleBtn" type="Button" parent="MapPanel"]
+layout_mode = 0
+offset_left = 1740.0
+offset_top = 10.0
+offset_right = 1880.0
+offset_bottom = 50.0
+text = "✦ 道痕"
+theme_override_font_sizes/font_size = 16
+
+[node name="TitleLabel" type="Label" parent="MapPanel"]
+layout_mode = 0
+offset_left = 660.0
+offset_top = 50.0
+offset_right = 1260.0
+offset_bottom = 100.0
+text = ""
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 30
+theme_override_colors/font_color = Color(0.9, 0.7, 0.3, 1)
+
+[node name="NodeContainer" type="VBoxContainer" parent="MapPanel"]
+layout_mode = 0
+offset_left = 710.0
+offset_top = 140.0
+offset_right = 1210.0
+offset_bottom = 900.0
+
+[node name="LockHintLabel" type="Label" parent="MapPanel"]
+layout_mode = 0
+offset_left = 660.0
+offset_top = 930.0
+offset_right = 1260.0
+offset_bottom = 960.0
+text = "（需先固化道痕才能进入战斗）"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.9, 0.3, 0.3, 1)
