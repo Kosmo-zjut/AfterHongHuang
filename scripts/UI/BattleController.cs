@@ -232,18 +232,6 @@ public partial class BattleController : Control
         OpenBattleMapOverlay();
     }
 
-    /// <summary>Victory panel's only navigation action. It opens the map above the focused modal.</summary>
-    private void OpenVictoryMapOverlay()
-    {
-        if (!IsVictoryModalActive)
-        {
-            GD.PrintErr("[战斗] 胜利地图入口缺少活动胜利模态层。");
-            return;
-        }
-
-        OpenBattleMapOverlay();
-    }
-
     private void OpenBattleMapOverlay()
     {
         if (_mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay))
@@ -1165,13 +1153,6 @@ public partial class BattleController : Control
         detail.Size = new Vector2(820, 180);
         _victoryPopup.AddChild(detail);
 
-        var continueBtn = new Button();
-        continueBtn.Text = "继 续";
-        continueBtn.AddThemeFontSizeOverride("font_size", 20);
-        continueBtn.SetPosition(new Vector2(650, 390));
-        continueBtn.Size = new Vector2(240, 60);
-        continueBtn.Pressed += OpenVictoryMapOverlay;
-        _victoryPopup.AddChild(continueBtn);
     }
 
     private void ShowVictoryPopup()
@@ -1237,15 +1218,6 @@ public partial class BattleController : Control
         foreach (var plan in _rewardPlans)
             AddCardRewardRow(rewardList, plan);
 
-        // 继续是总面板右下角的独立操作位：它只打开当前节点页上的共享地图层。
-        var continueBtn = new Button();
-        continueBtn.Text = "继 续";
-        continueBtn.AddThemeFontSizeOverride("font_size", 20);
-        continueBtn.SetPosition(new Vector2(690, 650));
-        continueBtn.Size = new Vector2(210, 66);
-        continueBtn.AddThemeColorOverride("font_color", new Color(0.9f, 0.8f, 0.3f));
-        continueBtn.Pressed += OpenVictoryMapOverlay;
-        _victoryPopup.AddChild(continueBtn);
     }
 
     private void AddCardRewardRow(VBoxContainer rewardList, RewardPlan plan)
@@ -1274,7 +1246,8 @@ public partial class BattleController : Control
     }
 
     /// <summary>
-    /// 切换到地图前同步清理战斗场景中的地图和胜利弹窗，避免旧节点在新流程中继续拦截输入。
+    /// 仅在地图内选择合法下一节点并且路由成功后，清理战斗场景的旧 overlay，
+    /// 避免旧节点在目标页面继续拦截输入。
     /// </summary>
     private void ClearBattleSceneOverlays()
     {
@@ -1336,8 +1309,11 @@ public partial class BattleController : Control
             MouseFilter = MouseFilterEnum.Stop,
         };
         _victoryModalLayer.AddChild(_victoryPopup);
+        NodeMapEntry.Add(_victoryModalLayer, ShowMapOverlay, IsMapOverlayOpen);
         return true;
     }
+
+    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
 
     private bool IsVictoryModalActive => _victoryModalLayer != null &&
         GodotObject.IsInstanceValid(_victoryModalLayer);

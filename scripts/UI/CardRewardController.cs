@@ -109,7 +109,8 @@ public static class CardRewardHelper
         overlay.Name = "CardRewardOverlay";
         overlay.SetPosition(new Vector2(0, 44));
         overlay.Size = new Vector2(1920, 1036);
-        // CardReward is the sole child modal above the frozen victory/map utility planes.
+        // CardReward blocks only content-area input. The coordinator's global operation layer
+        // remains above it so the shared NodeMapEntry can cancel this overlay recoverably.
         overlay.ZIndex = OverlayCoordinator.CardRewardZIndex;
         // Godot 枚举使用语义值而非本地约定数字；overlay 必须停止输入向下穿透。
         overlay.MouseFilter = Control.MouseFilterEnum.Stop;

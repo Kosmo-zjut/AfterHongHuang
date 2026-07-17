@@ -5,6 +5,11 @@ public static class OverlayCoordinatorSelfCheck
 {
     public static void Run()
     {
+        Ensure(OverlayCoordinator.GlobalOperationZIndex > OverlayCoordinator.CardRewardZIndex,
+            "全局地图入口未高于 CardReward 内容层，可能被奖励遮罩阻断。");
+        Ensure(OverlayCoordinator.GlobalOperationZIndex < OverlayCoordinator.TransitionAndErrorZIndex,
+            "全局地图入口不得覆盖 Transition/Error 输入层。");
+
         var victory = new Panel();
         Ensure(OverlayCoordinator.TryRegisterVictory(victory, out var victoryError), victoryError);
         VerifyGlobalEntryCancelsReward("地图", (out string error) => OverlayCoordinator.TryPrepareMap(out error));

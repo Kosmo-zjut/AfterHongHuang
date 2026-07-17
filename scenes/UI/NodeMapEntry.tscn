@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/NodeMapEntry.cs" id="1_node_map_entry"]
+
+[node name="NodeMapEntry" type="Button"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -264.0
+offset_top = -136.0
+offset_right = -64.0
+offset_bottom = -72.0
+grow_horizontal = 0
+grow_vertical = 0
+tooltip_text = "打开地图卷轴"
+theme_override_font_sizes/font_size = 20
+text = "🗺 地图"
+script = ExtResource("1_node_map_entry")

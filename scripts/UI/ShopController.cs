@@ -15,7 +15,6 @@ public partial class ShopController : Control
     private MapOverlayController _mapOverlay;
     private bool[] _sold = System.Array.Empty<bool>();
     private bool _invalidEntry;
-    private bool _settled;
     private ShopDefinition _shopDefinition;
 
     public override void _Ready()
@@ -54,6 +53,7 @@ public partial class ShopController : Control
             ShowInvalidState();
             return;
         }
+        NodeMapEntry.Add(this, ToggleMapOverlay, IsMapOverlayOpen);
         RefreshItems();
     }
 
@@ -80,8 +80,7 @@ public partial class ShopController : Control
 
         _titleLabel.Text = _shopDefinition.Title;
         _descriptionLabel.Text = _shopDefinition.Description;
-        if (!_settled)
-            _resultLabel.Text = $"当前灵韵：{GameManager.Instance.LingYun}";
+        _resultLabel.Text = $"当前灵韵：{GameManager.Instance.LingYun}";
         for (int i = 0; i < _inventory.Count; i++)
         {
             int index = i;
@@ -92,7 +91,7 @@ public partial class ShopController : Control
                     ? $"已售出  { _inventory[i].Name }"
                     : $"{_inventory[i].Name}  | {price} 灵韵\n{_inventory[i].Description.Replace("{0}", _inventory[i].Value.ToString())}",
                 CustomMinimumSize = new Vector2(560, 82),
-                Disabled = _settled || _sold[i] || GameManager.Instance.LingYun < price,
+                Disabled = _sold[i] || GameManager.Instance.LingYun < price,
             };
             button.AddThemeFontSizeOverride("font_size", 16);
             if (!_sold[i] && GameManager.Instance.LingYun < price)
@@ -102,19 +101,11 @@ public partial class ShopController : Control
             _purchaseButtons.Add(button);
         }
 
-        var leaveButton = new Button
-        {
-            Text = _settled ? "当前商店已结算\n请通过顶部地图选择下一节点" : "完成商店结算",
-            CustomMinimumSize = new Vector2(560, 72),
-            Disabled = _settled,
-        };
-        leaveButton.Pressed += LeaveShop;
-        _itemContainer.AddChild(leaveButton);
     }
 
     private void BuyCard(int index, int price)
     {
-        if (_settled || index < 0 || index >= _inventory.Count || _sold[index])
+        if (index < 0 || index >= _inventory.Count || _sold[index])
             return;
         var gm = GameManager.Instance;
         if (gm.LingYun < price)
@@ -128,26 +119,6 @@ public partial class ShopController : Control
         gm.AddCardToDeck(_inventory[index]);
         _sold[index] = true;
         GD.Print($"[商店] 已购买：{_inventory[index].Id}，价格={price}");
-        RefreshItems();
-    }
-
-    private void LeaveShop()
-    {
-        if (_settled) return;
-        var resultSummary = $"完成{_shopDefinition.Title}";
-        if (GameManager.Instance.CreateNodeResult(NodeResultType.Completed, resultSummary, out var createError) is not NodeResult result)
-        {
-            GD.PrintErr($"[商店] 创建结算失败：{createError}");
-            return;
-        }
-        if (!GameManager.Instance.SubmitNodeResult(result, out var submitError))
-        {
-            GD.PrintErr($"[商店] 结算失败：{submitError}");
-            _resultLabel.Text = "商店结算失败，未离开节点。";
-            return;
-        }
-        _settled = true;
-        _resultLabel.Text = $"{resultSummary}。请通过顶部地图选择下一节点。";
         RefreshItems();
     }
 
@@ -182,20 +153,20 @@ public partial class ShopController : Control
             return;
         }
 
-        var gm = GameManager.Instance;
-        bool interactive = _settled && gm.ActiveNodeResultSubmitted;
-        _mapOverlay = MapOverlayController.Open(this, interactive,
-            interactive ? OnMapNodePressed : null, () => _mapOverlay = null);
+        _mapOverlay = MapOverlayController.Open(this, !_invalidEntry,
+            _invalidEntry ? null : OnMapNodePressed, () => _mapOverlay = null);
         if (_mapOverlay == null)
             _resultLabel.Text = "地图 overlay 创建失败，请查看日志。";
     }
 
+    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
+
     private void OnMapNodePressed(MapNodeDefinition info)
     {
-        if (!_settled || info == null)
+        if (info == null)
             return;
         var gm = GameManager.Instance;
-        if (!gm.TryTransitionAndRouteFromCompletedNode(info, out var transitionError))
+        if (!gm.TryTransitionAndRouteFromActiveServiceNode(info, out var transitionError))
         {
             GD.PrintErr($"[商店] 目标节点事务迁移失败：{transitionError}");
             _resultLabel.Text = "进入下一节点失败，当前商店结果页已保留。";

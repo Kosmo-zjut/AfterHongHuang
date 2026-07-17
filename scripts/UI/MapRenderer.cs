@@ -22,8 +22,11 @@ public static class MapRenderer
         bool completedServiceNode = gm.ActiveNodeResultSubmitted && gm.ActiveNode != null &&
             (gm.CurrentState == PlayerState.灵脉中 || gm.CurrentState == PlayerState.商店中 ||
              gm.CurrentState == PlayerState.事件中);
+        bool activeServiceRoute = gm.ActiveNode != null && !gm.ActiveNodeResultSubmitted &&
+            (gm.CurrentState == PlayerState.灵脉中 || gm.CurrentState == PlayerState.商店中);
         bool canExploreFromMap = gm.CurrentState == PlayerState.空闲 ||
-                                  gm.CurrentState == PlayerState.战斗胜利结算 || completedServiceNode;
+                                  gm.CurrentState == PlayerState.战斗胜利结算 || completedServiceNode ||
+                                  activeServiceRoute;
         if (!canExploreFromMap || !gm.DaoMarkSelected || !gm.MapNodesUnlocked)
             return false;
         if (gm.CurrentState == PlayerState.战斗胜利结算 &&
@@ -138,8 +141,10 @@ public static class MapRenderer
         bool completedServiceNode = gm.ActiveNodeResultSubmitted && gm.ActiveNode != null &&
             (gm.CurrentState == PlayerState.灵脉中 || gm.CurrentState == PlayerState.商店中 ||
              gm.CurrentState == PlayerState.事件中);
+        bool activeServiceRoute = gm.ActiveNode != null && !gm.ActiveNodeResultSubmitted &&
+            (gm.CurrentState == PlayerState.灵脉中 || gm.CurrentState == PlayerState.商店中);
         if (gm.CurrentState != PlayerState.空闲 && gm.CurrentState != PlayerState.战斗胜利结算 &&
-            !completedServiceNode)
+            !completedServiceNode && !activeServiceRoute)
             return "当前节点只读";
         return IsNodeAccessible(node) ? "点击进入节点" : "当前不可达";
     }

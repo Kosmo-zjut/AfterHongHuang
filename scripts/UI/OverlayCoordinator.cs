@@ -14,6 +14,11 @@ public static class OverlayCoordinator
     public const int MapAndUtilityZIndexMax = 469;
     public const int CardRewardZIndex = 470;
     public const int CardRewardZIndexMax = 489;
+    // The upper edge of the CardReward plane is reserved for global operations. It stays
+    // above a content-only reward blocker while remaining below the Transition/Error plane.
+    public const int GlobalOperationZIndex = CardRewardZIndexMax;
+    public const int TransitionAndErrorZIndex = 490;
+    public const int TransitionAndErrorZIndexMax = 499;
 
     private static Node _mapOverlay;
     private static Node _deckOverlay;

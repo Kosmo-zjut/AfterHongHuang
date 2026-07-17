@@ -2,7 +2,7 @@ using Godot;
 using System.Collections.Generic;
 
 /// <summary>
-/// 灵脉场景控制器。负责灵脉选项、升级选卡和返回地图，不负责地图绘制。
+/// 灵脉场景控制器。负责灵脉选项和升级选卡；地图由共享 overlay 呼出，不负责页面离场。
 /// </summary>
 public partial class LingmaiController : Control
 {
@@ -14,7 +14,8 @@ public partial class LingmaiController : Control
     private MapOverlayController _mapOverlay;
     private MapNodeDefinition _lingmaiNode;
     private bool _invalidEntry;
-    private bool _settled;
+    private bool _healConsumed;
+    private bool _upgradeConsumed;
 
     public override void _Ready()
     {
@@ -35,6 +36,7 @@ public partial class LingmaiController : Control
             return;
         }
 
+        NodeMapEntry.Add(this, ToggleMapOverlay, IsMapOverlayOpen);
         ShowOptions();
     }
 
@@ -96,57 +98,38 @@ public partial class LingmaiController : Control
     {
         var gm = GameManager.Instance;
         _titleLabel.Text = "灵脉节点";
-        _descriptionLabel.Text = _settled
-            ? "当前灵脉已结算；可通过顶部地图查看并选择下一节点。"
-            : "可选择一项行动，也可返回地图继续前行；未选择不会消耗灵脉。";
+        _descriptionLabel.Text = "选择行动可获得对应收益；不选择也可直接通过地图继续前行。";
         ClearOptions();
 
-        if (_settled)
-        {
-            var settledButton = CreateButton("已结算", _resultLabel.Text, false, "当前灵脉已完成，不可重复操作");
-            _optionContainer.AddChild(settledButton);
-            var mapButton = CreateButton("返回地图", "打开地图卷轴并选择下一节点", true);
-            mapButton.Pressed += OpenMapOverlayOnly;
-            _optionContainer.AddChild(mapButton);
-            return;
-        }
-
         int healAmount = Mathf.Max(1, Mathf.FloorToInt(gm.PlayerMaxHp * 0.3f));
-        bool canHeal = gm.PlayerHp < gm.PlayerMaxHp;
+        bool canHeal = !_healConsumed && gm.PlayerHp < gm.PlayerMaxHp;
         var healButton = CreateButton(
             "休养生息",
             $"回复 {healAmount} 点生命（当前 {gm.PlayerHp}/{gm.PlayerMaxHp}）",
             canHeal,
-            canHeal ? "" : "气血已满，无需休养");
+            canHeal ? "" : _healConsumed ? "本次灵脉的休养生息已使用" : "气血已满，无需休养");
         healButton.Pressed += OnHealPressed;
         _optionContainer.AddChild(healButton);
 
         var upgradeableCards = gm.GetUpgradeableCards();
-        bool canUpgrade = upgradeableCards.Count > 0;
+        bool canUpgrade = !_upgradeConsumed && upgradeableCards.Count > 0;
         var upgradeButton = CreateButton(
             "精进道行",
             canUpgrade ? $"选择 1 张卡牌升级（可精进 {upgradeableCards.Count} 张）" : "暂无可精进的卡牌",
             canUpgrade,
-            canUpgrade ? "" : "暂无可精进的卡牌");
+            canUpgrade ? "" : _upgradeConsumed ? "本次灵脉的精进道行已使用" : "暂无可精进的卡牌");
         upgradeButton.Pressed += () => ShowUpgradeChoices(upgradeableCards);
         _optionContainer.AddChild(upgradeButton);
 
         var companionButton = CreateButton("疗愈道友", "当前无人同行", false, "当前无人同行");
         _optionContainer.AddChild(companionButton);
 
-        var returnButton = CreateButton("返回地图", "仅打开地图卷轴，不结算灵脉", true);
-        returnButton.Pressed += OpenMapOverlayOnly;
-        _optionContainer.AddChild(returnButton);
-
-        var abandonButton = CreateButton("放弃灵脉并继续前行", "明确放弃本次灵脉行动，不获得收益", true);
-        abandonButton.Pressed += AbandonLingmaiAndContinue;
-        _optionContainer.AddChild(abandonButton);
     }
 
     private void ShowUpgradeChoices(List<CardRuntime> upgradeableCards)
     {
         _titleLabel.Text = "精进道行";
-        _descriptionLabel.Text = "选择一张当前牌组中的卡牌，永久替换为升级版；返回不会消耗灵脉。";
+        _descriptionLabel.Text = "选择一张当前牌组中的卡牌，永久替换为升级版。";
         _resultLabel.Text = "";
         ClearOptions();
 
@@ -167,13 +150,6 @@ public partial class LingmaiController : Control
         backButton.Pressed += ShowOptions;
         _optionContainer.AddChild(backButton);
 
-        var mapButton = CreateButton("返回地图", "仅打开地图卷轴，不结算灵脉", true);
-        mapButton.Pressed += OpenMapOverlayOnly;
-        _optionContainer.AddChild(mapButton);
-
-        var abandonButton = CreateButton("放弃灵脉并继续前行", "明确放弃本次灵脉行动，不获得收益", true);
-        abandonButton.Pressed += AbandonLingmaiAndContinue;
-        _optionContainer.AddChild(abandonButton);
     }
 
     private void OnHealPressed()
@@ -189,7 +165,12 @@ public partial class LingmaiController : Control
         int oldHp = gm.PlayerHp;
         int healAmount = Mathf.Max(1, Mathf.FloorToInt(gm.PlayerMaxHp * 0.3f));
         gm.PlayerHp = Mathf.Min(gm.PlayerMaxHp, gm.PlayerHp + healAmount);
-        CompleteLingmai($"休养生息，生命 {oldHp}/{gm.PlayerMaxHp} → {gm.PlayerHp}/{gm.PlayerMaxHp}");
+        _healConsumed = true;
+        string result = $"休养生息，生命 {oldHp}/{gm.PlayerMaxHp} → {gm.PlayerHp}/{gm.PlayerMaxHp}";
+        GameManager.Instance.LastLingmaiResult = result;
+        _resultLabel.Text = result;
+        ShowOptions();
+        GD.Print($"[灵脉] {result}");
     }
 
     private void OnUpgradeCardPressed(CardRuntime card, CardInfo upgradedInfo)
@@ -202,60 +183,12 @@ public partial class LingmaiController : Control
             return;
         }
 
-        CompleteLingmai($"精进道行，{oldName} → {upgradedInfo.Name}");
-    }
-
-    private void CompleteLingmai(string result)
-    {
-        if (_lingmaiNode == null)
-        {
-            GD.PrintErr("[灵脉] 结算失败：当前灵脉节点为空，未修改访问状态。");
-            return;
-        }
-
-        var gm = GameManager.Instance;
-        var nodeResult = gm.CreateNodeResult(NodeResultType.Completed, result, out var createError);
-        string submitError = "";
-        bool submitted = nodeResult != null && gm.SubmitNodeResult(nodeResult, out submitError);
-        if (!submitted)
-        {
-            GD.PrintErr($"[灵脉] 结算失败，未标记节点：{createError}{submitError}");
-            _resultLabel.Text = "结算失败，请返回地图重新进入。";
-            return;
-        }
-
-        gm.LastLingmaiResult = result;
-        _settled = true;
+        _upgradeConsumed = true;
+        string result = $"精进道行，{oldName} → {upgradedInfo.Name}";
+        GameManager.Instance.LastLingmaiResult = result;
         _resultLabel.Text = result;
         ShowOptions();
         GD.Print($"[灵脉] {result}");
-    }
-
-    /// <summary>Opens the shared overlay only. Navigation alone never creates an Exited node result.</summary>
-    private void OpenMapOverlayOnly()
-    {
-        ToggleMapOverlay();
-    }
-
-    /// <summary>Explicit gameplay action for abandoning the current Lingmai and advancing its route.</summary>
-    private void AbandonLingmaiAndContinue()
-    {
-        if (_settled)
-            return;
-        var gm = GameManager.Instance;
-        var nodeResult = gm.CreateNodeResult(NodeResultType.Exited, "灵脉未选择行动", out var createError);
-        string submitError = "";
-        bool submitted = nodeResult != null && gm.SubmitNodeResult(nodeResult, out submitError);
-        if (!submitted)
-        {
-            GD.PrintErr($"[灵脉] 放弃灵脉未能记录 Exited/Skipped 状态：{createError}{submitError}");
-            return;
-        }
-
-        _settled = true;
-        _resultLabel.Text = "已放弃灵脉行动，可通过地图选择下一节点。";
-        ShowOptions();
-        GD.Print("[灵脉] 已明确放弃行动，记录 Exited/Skipped 状态。" );
     }
 
     private void ToggleMapOverlay()
@@ -266,20 +199,20 @@ public partial class LingmaiController : Control
             return;
         }
 
-        var gm = GameManager.Instance;
-        bool interactive = _settled && gm.ActiveNodeResultSubmitted;
-        _mapOverlay = MapOverlayController.Open(this, interactive,
-            interactive ? OnMapNodePressed : null, () => _mapOverlay = null);
+        _mapOverlay = MapOverlayController.Open(this, !_invalidEntry,
+            _invalidEntry ? null : OnMapNodePressed, () => _mapOverlay = null);
         if (_mapOverlay == null)
             _resultLabel.Text = "地图 overlay 创建失败，请查看日志。";
     }
 
+    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
+
     private void OnMapNodePressed(MapNodeDefinition info)
     {
-        if (!_settled || info == null)
+        if (info == null)
             return;
         var gm = GameManager.Instance;
-        if (!gm.TryTransitionAndRouteFromCompletedNode(info, out var transitionError))
+        if (!gm.TryTransitionAndRouteFromActiveServiceNode(info, out var transitionError))
         {
             GD.PrintErr($"[灵脉] 目标节点事务迁移失败：{transitionError}");
             _resultLabel.Text = "进入下一节点失败，当前结果页已保留。";

@@ -1904,3 +1904,104 @@ Title → CharacterSelect → Map → (道痕 overlay) → Map → Battle → Ca
 ## 已知风险
 
 - `OpenMapOnEnter` 仍作为迁移期兼容字段保留，并由其 setter 同步显式 `MapEntryMode`；MapController 正式入口不再读取该布尔字段。后续可在导航统一迁移后删除兼容字段。
+
+---
+
+# 2026-07-17 | 开发部 NODE-MAP-ENTRY-C1 节点页共享地图入口
+
+## 变更概述
+
+- 新增 `NodePageMapEntryButton`，将战斗胜利、灵脉和商店的外置“继续”统一绑定到各页面已有的 `ToggleMapOverlay`。入口本身不提交 `NodeResult`、不消费奖励或服务节点收益、不切场景。
+- 战斗胜利页移除内容面板内的继续按钮，改为胜利模态右侧偏下的共享地图入口；胜利与 `CardReward` UI 保持在原页，地图关闭后不重建或清理它们。
+- 灵脉和商店进入时立即把当前地图位置推进到服务节点，地图 overlay 因而立即展示并允许下一层合法节点；灵脉不再提供“返回地图/放弃灵脉”动作，商店不再提供“完成商店结算”动作。
+- 灵脉的休养生息和精进道行分别只灰置自身，收益只在按钮点击时写入；不选任何收益不阻塞后续地图节点。商店购买状态仅由库存和灵韵决定，开关地图不改变库存。
+- 新增 `GameManager.TryTransitionAndRouteFromActiveServiceNode`：只有点击 overlay 中的合法下一节点才会离开活动灵脉/商店页；场景路由失败会回滚到原服务页和原活动节点上下文。
+- `MapRenderer` 识别活动灵脉/商店为可探索路线状态，不再要求伪造完成结果。TopBar 背景和右侧容器改为完整拉伸，修复右侧背景缺口。
+
+## 修改文件
+
+- `scripts/UI/NodePageMapEntryButton.cs`（新增）
+- `scripts/Core/GameManager.cs`
+- `scripts/UI/MapRenderer.cs`
+- `scripts/UI/BattleController.cs`
+- `scripts/UI/LingmaiController.cs`
+- `scripts/UI/ShopController.cs`
+- `scripts/UI/TopBar.cs`
+
+## 入口扫描结论
+
+- 战斗胜利页：外置共享地图入口；实际节点迁移仅在 overlay 合法节点回调中调用 `TryTransitionAndRouteFromCompletedNode`。
+- 灵脉/商店：TopBar 与外置共享入口都调用同一 `ToggleMapOverlay`；实际节点迁移仅在合法节点回调中调用 `TryTransitionAndRouteFromActiveServiceNode`。
+- Event：仍使用已完成事件的合法节点迁移端口；“返回地图”仅保留无效入口恢复页，不属于正常流程。
+- MapScene 道痕底页的“继续”仍是初始引导，等效 TopBar 地图开关；本轮未将其作为节点页离场入口处理。
+
+## 验证与限制
+
+- Debug：`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- 使用隔离 `APPDATA/LOCALAPPDATA` 的 Godot 4.7 Mono Editor headless 场景解析：`Map/Battle/Lingmai/Shop/Event` 均退出码 0。
+- 完整项目 `--headless --quit` 在 120 秒后发生 Godot 原生 signal 11，未得到自检 PASS；因此本轮未宣称 500-seed 自检或窗口交互已通过。
+
+## 已知风险
+
+- 本轮复用了现有脚本动态 UI；`NodePageMapEntryButton` 是集中复用的过渡控件，后续正式 UI 资源化时应迁移为 `.tscn` 组件。
+- 需要窗口复测：胜利页继续 -> 关地图 -> 原奖励页不变；灵脉/商店无需结算即可点击下一层；非法目标和路由失败仍保留原页面；TopBar 右侧背景连续且始终可交互。
+
+---
+
+# 2026-07-17 | 开发部 NODE-MAP-ENTRY-C1R 资源化统一地图入口
+
+## 变更概述
+
+- 移除 C1 临时的 `NodePageMapEntryButton` 脚本布局实现，改为复用 `scenes/UI/NodeMapEntry.tscn + NodeMapEntry.cs`。
+- 入口场景使用右下锚点和偏移承载冻结布局：`right=64px`、`bottom=72px`、`200×64px`；文本为 `🗺 地图`。不再在 C# 写入位置、尺寸、颜色或字号。
+- `NodeMapEntry` 只接收当前页面已有的地图 overlay toggle 和状态查询。它按真实开关状态显示“打开地图卷轴”或“收起地图卷轴” tooltip，不具备结算、奖励、NodeResult 或场景路由能力。
+- Battle、Lingmai、Shop 三个入口均改为同一 `NodeMapEntry.Add(..., Toggle, IsMapOverlayOpen)` 绑定；C1 的服务节点进入即推进、合法下一节点点击才离场、失败回滚逻辑保持不变。
+
+## 修改文件
+
+- 删除 `scripts/UI/NodePageMapEntryButton.cs` 及其 UID。
+- 新增 `scripts/UI/NodeMapEntry.cs`。
+- 新增 `scenes/UI/NodeMapEntry.tscn`。
+- 修改 `scripts/UI/BattleController.cs`、`scripts/UI/LingmaiController.cs`、`scripts/UI/ShopController.cs`。
+
+## 扫描与验证
+
+- Battle/Lingmai/Shop 仅各有一个 `NodeMapEntry.Add` 调用；没有遗留 `NodePageMapEntryButton`、`完成商店结算`、`放弃灵脉并继续前行`、`LeaveShop` 或直接 `Map.tscn` 路由。
+- 节点页的路线迁移仍仅出现在地图合法节点回调：Battle 使用已完成节点端口，Lingmai/Shop 使用活动服务节点端口。
+- Debug：`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- 隔离 `APPDATA/LOCALAPPDATA` 的 Godot 4.7 Mono Editor headless 场景解析：`NodeMapEntry/Battle/Lingmai/Shop` 均退出码 0。
+
+## 已知限制
+
+- 完整项目 `--headless --quit` 仍会在 120 秒后发生 Godot 原生 signal 11；本轮没有据此宣称完整自检、500-seed 或窗口交互通过，等待 QA 与窗口复测。
+
+---
+
+# 2026-07-17 | 开发部 NODE-MAP-ENTRY-C2 CardReward 全局地图入口层级修复
+
+## 根因与修复
+
+- QA 发现 `NodeMapEntry` 固定在 z=401，而 `CardRewardOverlay` 位于 z=470 且以 `MouseFilter.Stop` 覆盖 TopBar 下方内容区，导致奖励打开时外置地图入口不可点击。
+- 在 `OverlayCoordinator` 集中新增 `GlobalOperationZIndex`，占用 CardReward 平面的顶端 z=489，并声明 Transition/Error 为 z=490~499。`NodeMapEntry.Configure()` 从该常量设置绝对层级；资源场景不再保存独立的 z 值。
+- CardReward 保持全内容区 `MouseFilter.Stop`，不向手牌、日志、结束回合或战斗区域穿透。全局 NodeMapEntry 以 z=489 位于其上方；点击继续调用宿主已有的地图 toggle，进而由 `MapOverlayController.Open()` 调用 `OverlayCoordinator.TryPrepareMap()`。
+- `TryPrepareMap()` 已通过 `CardRewardHelper.TryCancelForGlobalOverlay()` 调用与跳过相同的取消回调，关闭奖励层并恢复原奖励行；不消费奖励、不改变候选或领取进度。地图关闭后底层胜利页仍保留。
+- 更新 `OverlayCoordinatorSelfCheck`：断言全局操作层高于 CardReward 根层且低于 Transition/Error 层；原有全局地图/套牌/设置取消奖励、恢复奖励行且不改变候选进度的反证保持执行。
+
+## 修改文件
+
+- `scripts/UI/OverlayCoordinator.cs`
+- `scripts/UI/NodeMapEntry.cs`
+- `scenes/UI/NodeMapEntry.tscn`
+- `scripts/UI/CardRewardController.cs`
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+- `scripts/UI/LingmaiController.cs`
+- `scripts/UI/BattleController.cs`
+
+## 验证
+
+- Debug：`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- 隔离 `APPDATA/LOCALAPPDATA` 的 Godot 4.7 Mono Editor headless 场景解析：`NodeMapEntry/Battle/Lingmai/Shop/Event` 均退出码 0。
+- 完整项目 `--headless --quit` 的 Godot 原生 signal 11 仍存在，未宣称完整自检、500-seed 或窗口交互通过，等待 QA 严格回归和窗口复测。

@@ -48,6 +48,7 @@ public partial class TopBar : Control
         var bg = new ColorRect();
         bg.Color = new Color(0.08f, 0.06f, 0.04f, 0.92f);
         bg.SetAnchorsPreset(LayoutPreset.FullRect);
+        bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         bg.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(bg);
 
@@ -56,6 +57,7 @@ public partial class TopBar : Control
         mainLayout.SetAnchorsPreset(LayoutPreset.FullRect);
         mainLayout.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         mainLayout.AddThemeConstantOverride("separation", 0);
+        mainLayout.SizeFlagsVertical = SizeFlags.ExpandFill;
         AddChild(mainLayout);
 
         // ==================== 左侧信息区 ====================
@@ -100,6 +102,7 @@ public partial class TopBar : Control
         // ==================== 右侧按钮区 ====================
         var rightSection = new HBoxContainer();
         rightSection.AddThemeConstantOverride("separation", 4);
+        rightSection.SizeFlagsVertical = SizeFlags.ExpandFill;
 
         _deckBtn = CreateTopButton("📋 套牌");
         _deckBtn.Pressed += () => OnDeckPressed?.Invoke();

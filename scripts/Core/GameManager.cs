@@ -1012,7 +1012,11 @@ public partial class GameManager : Node
         return true;
     }
 
-    /// <summary>进入生产灵脉场景，只激活节点；是否完成由灵脉结果提交决定。</summary>
+    /// <summary>
+    /// Enters a Lingmai page and advances the one-way map position immediately.
+    /// The node is not consumed here: an optional Lingmai action is tracked by the page,
+    /// while the next legal map click performs the actual page transition.
+    /// </summary>
     public bool TryEnterLingmai(MapNodeDefinition node, out string error)
     {
         if (node == null || node.NodeType != MapGraphNodeType.Lingmai)
@@ -1027,6 +1031,11 @@ public partial class GameManager : Node
         ActiveEncounter = null;
         _activeResultSubmitted = false;
         CurrentState = PlayerState.灵脉中;
+        if (!TryAdvanceServiceRouteOnEntry(node, out error))
+        {
+            AbortActiveNodeEntry(out _);
+            return false;
+        }
         return true;
     }
 
@@ -1045,7 +1054,13 @@ public partial class GameManager : Node
         if (!TryActivateNode(node, out error))
             return false;
         ActiveEncounter = null;
+        _activeResultSubmitted = false;
         CurrentState = PlayerState.商店中;
+        if (!TryAdvanceServiceRouteOnEntry(node, out error))
+        {
+            AbortActiveNodeEntry(out _);
+            return false;
+        }
         return true;
     }
 
@@ -1107,7 +1122,8 @@ public partial class GameManager : Node
     /// 在销毁当前结算页前预检目标节点定义。该方法只读，不创建 ActiveNode，
     /// 用于避免目标入口失败时先丢失原结果页。
     /// </summary>
-    public bool TryValidateNodeEntry(MapNodeDefinition node, out string error)
+    public bool TryValidateNodeEntry(MapNodeDefinition node, out string error,
+        bool allowActiveServiceNode = false)
     {
         error = "";
         if (node == null || MapGraph?.GetNode(node.NodeId) == null)
@@ -1117,7 +1133,7 @@ public partial class GameManager : Node
             return false;
         }
 
-        if (ActiveNode != null && !_activeResultSubmitted)
+        if (ActiveNode != null && !_activeResultSubmitted && !allowActiveServiceNode)
         {
             error = $"当前节点尚未提交结果，拒绝进入新节点：{ActiveNode.NodeId}";
             GD.PrintErr($"[GameManager] {error}");
@@ -1187,6 +1203,27 @@ public partial class GameManager : Node
                 return false;
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Service pages are entered from the map itself, so their position becomes the route
+    /// origin at entry time. No lifecycle terminal state or reward is created by this step.
+    /// </summary>
+    private bool TryAdvanceServiceRouteOnEntry(MapNodeDefinition node, out string error)
+    {
+        error = "";
+        var graphNode = _runState.MapGraph?.GetNode(node.NodeId);
+        if (graphNode == null || graphNode.NodeType != node.NodeType)
+        {
+            error = $"服务节点不属于当前 MapGraph：{node.NodeId}";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+
+        CurrentMapLayer = graphNode.LayerIndex;
+        CurrentMapIndex = graphNode.LayerOrder;
+        CurrentMapNodeId = graphNode.NodeId;
         return true;
     }
 
@@ -1595,6 +1632,53 @@ public partial class GameManager : Node
     /// </summary>
     public bool TryTransitionAndRouteFromCompletedNode(MapNodeDefinition target, out string error) =>
         TryTransitionFromCompletedNodeInternal(target, routeToTarget: true, out error);
+
+    /// <summary>
+    /// Leaves an active Lingmai or Shop page only after the player selects a legal next map node.
+    /// These pages advance route position on entry and do not require a synthetic completion result
+    /// merely to keep exploring. A routing failure restores the original page and active context.
+    /// </summary>
+    public bool TryTransitionAndRouteFromActiveServiceNode(MapNodeDefinition target, out string error)
+    {
+        error = "";
+        bool isActiveServiceNode = ActiveNode != null && !_activeResultSubmitted &&
+            (CurrentState == PlayerState.灵脉中 || CurrentState == PlayerState.商店中) &&
+            (ActiveNode.NodeType == MapGraphNodeType.Lingmai || ActiveNode.NodeType == MapGraphNodeType.Shop);
+        if (!isActiveServiceNode)
+        {
+            error = "当前不在可从地图继续的灵脉或商店节点页。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+
+        if (!TryValidateNodeEntry(target, out error, allowActiveServiceNode: true))
+            return false;
+
+        var snapshot = CompletedNodeTransitionSnapshot.Capture(this);
+        try
+        {
+            string sourceNodeId = ActiveNode.NodeId;
+            _runState.NodeStates.Remove(sourceNodeId);
+            ActiveNode = null;
+            ActiveEncounter = null;
+            _activeResultSubmitted = false;
+            CurrentState = PlayerState.空闲;
+
+            if (!TryEnterNode(target, out error))
+                throw new System.InvalidOperationException(error);
+            if (!NodeSceneRouter.TryRouteActiveNode(this, target, out error))
+                throw new System.InvalidOperationException(error);
+            return true;
+        }
+        catch (System.Exception exception)
+        {
+            snapshot.Restore(this);
+            if (string.IsNullOrWhiteSpace(error))
+                error = exception.Message;
+            GD.PrintErr($"[GameManager] 服务节点迁移已回滚，保留当前节点页：{error}");
+            return false;
+        }
+    }
 
     private bool TryTransitionFromCompletedNodeInternal(MapNodeDefinition target, bool routeToTarget,
         out string error)
