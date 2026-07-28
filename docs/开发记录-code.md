@@ -2005,3 +2005,854 @@ Title → CharacterSelect → Map → (道痕 overlay) → Map → Battle → Ca
 - Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
 - 隔离 `APPDATA/LOCALAPPDATA` 的 Godot 4.7 Mono Editor headless 场景解析：`NodeMapEntry/Battle/Lingmai/Shop/Event` 均退出码 0。
 - 完整项目 `--headless --quit` 的 Godot 原生 signal 11 仍存在，未宣称完整自检、500-seed 或窗口交互通过，等待 QA 严格回归和窗口复测。
+
+---
+
+# 2026-07-20 | 开发部 UI-REWARD-NODE-COHERENCE C1 本地继续与灵脉一致性
+
+## 变更概述
+
+- 废止 C2 的 `GlobalOperationZIndex=489`：`NodeMapEntry` 改为页面本地继续控件，统一显示“继续”、tooltip 为“打开地图”，层级集中为 `NodePageMapEntryZIndex=449`。Map overlay（450）与 CardReward（470）均在它之上，地图展开或选卡时会完整遮挡和阻断继续；TopBar 仍在内容区外保持全局可用。
+- CardReward 不再需要向本地继续穿透。TopBar 打开地图仍通过 `OverlayCoordinator.TryPrepareMap()` 的可恢复取消链关闭奖励 overlay，恢复同一奖励行、候选和多选进度，不消费奖励。
+- 新增 `VictoryRewardList.tscn` 与 `VictoryRewardList` 工厂，将胜利奖励列改为 960px 胜利面板内居中的 600px `VBoxContainer`；奖励行采用横向 `ExpandFill`，不再在 BattleController 堆叠奖励列位置和宽度。
+- 新增最小 `PartyRoster/PartyMember` RunState 契约及 `GameManager.GetEligibleLingmaiHealingTargets()` 查询。单人局没有可疗愈的非自身友方，因此不渲染“疗愈道友”；未来招募友方后可由同一查询提供入口，不实现联机或完整队友结算。
+- 灵脉“休养生息”满血时保持可点击。点击会进入一次性已使用状态，生命保持不变并显示明确反馈；受伤时继续按 30% 上限规则回复。
+- 新增 `LingmaiActionRules` 和 `LingmaiInteractionSelfCheck`，覆盖满血无数值变化、受伤回复、单人隐藏和真实友方目标查询。Overlay 自检补充本地继续必须被 Map/CardReward 覆盖的层级断言，并保留 TopBar 可恢复关闭 CardReward 的候选进度反证。
+
+## 修改文件
+
+- `scripts/UI/OverlayCoordinator.cs`
+- `scripts/UI/NodeMapEntry.cs`
+- `scenes/UI/NodeMapEntry.tscn`
+- `scripts/UI/VictoryRewardList.cs`（新增）
+- `scenes/UI/VictoryRewardList.tscn`（新增）
+- `scripts/UI/BattleController.cs`
+- `scripts/UI/CardRewardController.cs`
+- `scripts/UI/LingmaiController.cs`
+- `scripts/UI/ShopController.cs`
+- `scripts/Core/RunState.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/Core/PartyRoster.cs`（新增）
+- `scripts/Core/LingmaiActionRules.cs`（新增）
+- `scripts/Core/LingmaiInteractionSelfCheck.cs`（新增）
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+
+## 验证与限制
+
+- Debug：`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- 隔离 `APPDATA/LOCALAPPDATA` 的 Godot 4.7 Mono Editor headless 场景解析：`NodeMapEntry/VictoryRewardList/Battle/Lingmai/Shop/Event` 均退出码 0。
+- 完整项目 `--headless --quit` 仍会发生 Godot 原生 signal 11，因此新增 Debug 自检尚未在完整运行态得到 PASS；未宣称窗口或 500-seed 通过。
+
+## 扫描结论与风险
+
+- Battle/Lingmai/Shop/Event 扫描未发现旧的全局入口、完成商店结算、放弃灵脉或直接 `Map.tscn` 路由；只有地图合法节点回调调用迁移端口。
+- 内容硬编码扫描命中均为 Encounter/Map Catalog 集中定义或自检 fixture。`MapController.cs` 与 `DaoMarkSelectController.cs` 的 `System.Random` 是已登记 R-039 奖励稳定流遗留，本轮未扩大处理。
+- 需要窗口复测：胜利奖励列居中；CardReward 打开时继续被遮挡、TopBar 地图可恢复奖励行；地图关闭后继续和同一奖励候选恢复；满血点击休养后按钮灰置且生命不变；单人灵脉不显示疗愈道友。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-AUTHORING-C2 + CARD-BALANCE-B1-C2B
+
+## 变更概述
+
+- 新增 Schema v1 的 `CardDefinitionResource`、`CardCatalogResource`、强类型费用/目标策略/有序效果投影及纯 `CardDefinitionValidator`。运行期由 `CardCatalogService` 加载显式 Catalog 和单卡 Resource；缺资源、未知池、升级断裂、无效目标/效果和预览/可用性元数据会显式拒绝，不回退 `DataDefs`。
+- 新增 `resources/cards/CardCatalog.tres` 与 21 张单卡 `.tres`：4 初始、4 升级、10 常规奖励、3 Boss 奖励。初始重复量改为 `CharacterInfo.StarterDeckEntries` 的 `CardId + Count` 配置，单卡定义不再复制十次。
+- `CharacterDeckFactory`、`CardPoolCatalog`、升级查询、奖励/商店/事件卡池入口改由 Catalog 投影供给；`DataDefs` 的旧 `CardInfo[]` 只保留给 `CardCatalogSelfCheck` 的迁移 fixture。战斗临时堆和永久套牌均复制 `CardInfo` 投影，避免临时实例反向污染永久套牌。
+- 新增 `CardCatalogSelfCheck`：验证 21 卡/4 池、迁移双读、两张显著不同卡经同一 Catalog 入口不串用、结构化目标/消弭投影，以及 B1 受控差异。旧 `RequiresEnemyTarget` 仅作为迁移兼容字段；Schema 唯一目标事实为 `TargetPolicy`/`TargetMode`。
+- 应用冻结 `B1-20260720`，仅写新 Resource：格挡+护体 7；血挡护体 10；裂肤引火与祭血凝劲按“自损 -> 斗劲 -> 消弭”；焚脉重拳易损 1；烬骨守势护体 16；九首回潮护体 16。旧 `DataDefs.cs` 基线未改。
+- 新增仅编辑器可见的 `addons/card_authoring`：`EditorPlugin + CardAuthoringDock.tscn` 支持草稿创建/编辑、目标策略预览、效果排序、字段校验、预览/Diff、取消丢弃和确认写入单卡 Resource/Catalog 索引。插件未注册到 `project.godot`，玩家 TopBar/战斗/地图/设置没有入口。
+
+## 修改文件
+
+- `scripts/Data/CardDefinitionResource.cs`、`CardCatalogResource.cs`、`CardDefinitionValidator.cs`、`CardCatalogService.cs`、`CardCatalogSelfCheck.cs`（新增）
+- `resources/cards/CardCatalog.tres` 与 21 张单卡 Resource（新增）
+- `addons/card_authoring/plugin.cfg`、`card_authoring_plugin.gd`、`CardAuthoringDock.tscn`、`card_authoring_dock.gd`（新增）
+- `scripts/Data/DataDefs.cs`、`CardPoolCatalog.cs`
+- `scripts/Core/CharacterDeckFactory.cs`、`GameManager.cs`、`StateContractSelfCheck.cs`
+- `scripts/Map/B2EncounterProductionSelfCheck.cs`
+
+## 验证
+
+- Debug：`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Release：`dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误。
+- Godot 4.7 Mono Console `--headless --quit` 退出码 0；`CardCatalogSelfCheck`、`StateContractSelfCheck`、奖励状态机、灵脉自检均 PASS。MapGraph 验证仍为 500 seeds、failures=0、crossings=0。
+- Editor headless 场景解析通过：`addons/card_authoring/CardAuthoringDock.tscn`、`Battle/Map/Lingmai/Shop/Event`。
+- 硬编码扫描：生产 `scripts/Core`/`scripts/UI` 未发现具体卡牌 ID/名称、旧 DataDefs 卡池或按职业/费用/数值分支；旧数组只由迁移自检引用。`RequiresEnemyTarget` 只保留在兼容投影/fixture，运行时交互仍读 `TargetMode`。
+
+## 已知限制
+
+- 编辑器插件已完成最小可加载/写入链，但未在可见 Godot Editor 内手工点按保存；需内容团队打开插件后补一次草稿校验、预览和确认写入窗口验收。
+- `CardInfo` 仍是现有 Battle/UI 的兼容投影；后续可逐步让卡面与执行器直接消费 `CardDefinitionResource` 的强类型效果列表，避免长期保留旧字段。
+- R-039（奖励消费 RewardId 跨重载持久化与部分奖励稳定随机）仍是 P1，本轮未宣称完成。
+
+---
+
+# 2026-07-20 | 开发部 UI-REWARD-NODE-C1R / C1R2 多人灵脉疗愈入口
+
+## 变更与验证
+
+- `PartyRoster` 成为唯一队伍查询端口：成员具备稳定 ID、显示名、当前/最大生命、存活/可疗愈资格；查询仅返回非自身、存活且可疗愈友方。
+- `LingmaiController` 按每个合规成员创建独立可点击“疗愈道友：显示名”入口，并传递实际成员 ID；单人时不渲染占位。操作后由集中规则结果灰置全部同伴疗愈入口，不影响地图 overlay 或继续语义。
+- `LingmaiActionRules.TryResolveCompanionHealing` 统一 PartyRoster 实际治疗、满血无数值变化、动作消耗和“气血已满”反馈。`LingmaiInteractionSelfCheck` 覆盖双队友分别治疗、目标隔离、单人隐藏、满血目标仍可选/不变/动作消耗/反馈与灰置契约。
+- Debug/Release build 通过；完整 Godot headless 中 `LingmaiInteractionSelfCheck` PASS；`Lingmai.tscn` editor-headless 解析通过。
+
+## 已知限制
+
+- 未实现完整队友招募、战斗队友或联机；当前仅提供可扩展 RunState roster/节点行动入口。仍需窗口复测多名真实队友的入口顺序、点击反馈和灰置视觉。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-EXECUTION-EDITOR-C3
+
+## 变更概述
+
+- 新增不可变 `CardExecutionPlan`，由通过 Schema 校验的 `CardDefinitionResource` 与兼容 `CardInfo` 投影同时生成。`GameManager.PlayCard()` 现在按 `Effects.Order` 逐项执行自损、伤害、护体、状态和消弭；旧 `CardInfo` 聚合字段仅用于既有卡面/控件兼容，不再决定战斗结算顺序。
+- 永久套牌、战斗复制、奖励入牌和升级均通过 Catalog 创建或复制带 `ExecutionPlan` 的 `CardRuntime`。缺少执行计划或 Catalog 定义会明确拒绝出牌/入牌，不回退旧 `DataDefs`。
+- `CardDefinitionReader` 增加严格读取路径。TargetPolicy、费用、效果、升级字段缺失、类型不符或未知枚举会携带字段路径进入 Validator，不能再静默降级为 `None` 或零值。
+- 编辑器 dock 增加描述、角色归属、卡池、升级家族、标签、可用版本、平衡定位和效果类型/数值的草稿入口；保存改为 Resource 与 Catalog 双 pending 写入、字节备份与回滚。任一预写/提交失败不更新内存 Catalog，并清理临时文件。
+- `CardCatalogSelfCheck` 增加执行计划存在性和未知/缺失 TargetPolicy 被拒绝的反证。
+
+## 修改文件
+
+- `scripts/Data/CardExecutionPlan.cs`（新增）
+- `scripts/Data/CardDefinitionResource.cs`
+- `scripts/Data/CardDefinitionValidator.cs`
+- `scripts/Data/CardCatalogService.cs`
+- `scripts/Data/CardCatalogSelfCheck.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/Core/CharacterDeckFactory.cs`
+- `scripts/Core/EnemyDefinitionExecutionSelfCheck.cs`
+- `addons/card_authoring/CardAuthoringDock.tscn`
+- `addons/card_authoring/card_authoring_dock.gd`
+
+## 验证与限制
+
+- 使用隔离 `APPDATA/LOCALAPPDATA/DOTNET_CLI_HOME`、本机只读 `C:\Users\ASUS\.nuget\packages` 的 Godot SDK 缓存：Debug `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 通过，0 警告、0 错误；Release 同命令加 `-c Release` 通过，0 警告、0 错误。
+- Godot 4.7 Mono Console `--path . --headless --quit` 退出码 0：`CardCatalogSelfCheck`、奖励状态机、灵脉自检及既有 `MapGraphRngSelfCheck`（500 seeds、failures=0、crossings=0）均 PASS。
+- `--editor --headless --quit` 退出码 0，编辑器成功加载 `CardDefinitionResource` 和 `addons/card_authoring` dock；未发现 GDScript/tscn 解析错误。
+- 仍需在可见 Editor 中手工覆盖草稿写入失败注入、真实 Catalog 文件替换与两效果顺序互换后的卡面日志体验；本轮自动化覆盖严格解析与执行计划存在性，尚未替代该窗口验收。
+- R-039（RewardId 跨重载持久化与部分奖励稳定随机）仍为 P1，未在本轮处理。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-EXECUTION-EDITOR-C4
+
+## 变更概述
+
+- 新增 `ResolvedCardExecution`：出牌前冻结执行计划、战斗状态指纹、状态版本和有序摘要；执行前再次核对身份/版本/指纹。卡面、战斗日志和实际结算统一读取同一个 `CardExecutionPlan` 的有序 Effects。
+- `PlayCard` 使用 `EnemyTurnSnapshot` 包裹能量扣除、效果、移区与临时状态。任何计划验证或执行期失败都会回滚生命、护体、敌方状态、能量和战斗牌堆；不再留下半张已结算卡。
+- `CardRuntime.ExecutionPlan` 改为私有 setter，只能由构造、Catalog 创建或受控升级替换写入，避免外部任意改写计划。
+- `CardInfo` 新增兼容的 `ExecutionSummary`，由 Catalog 投影以 `CardExecutionPlanFormatter` 生成；Battle 卡面优先显示该有序摘要，打出日志记录已消费的 `ResolvedCardExecution.Summary`。
+- 编辑器新草稿改为显式未分配状态，不再预填角色、卡池、家族或名称占位；保存前拒绝 Catalog 中相同 ID 的不同路径和目标路径覆盖，并保留 C3 的 pending/备份回滚机制。
+
+## 验证
+
+- Debug：隔离 `APPDATA/LOCALAPPDATA/DOTNET_CLI_HOME`，使用只读 `C:\Users\ASUS\.nuget\packages`，执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，0 警告、0 错误。
+- Release：同环境执行 `dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj`，0 警告、0 错误。
+- Godot 4.7 Mono Console：`--path . --headless --quit` 退出码 0；CardCatalog、奖励、灵脉和 500-seed MapGraph 自检均 PASS。
+
+## 残留风险
+
+- 仍需可见 Editor 复测完整草稿的字段编辑、磁盘故障注入与 pending 文件回滚；本轮已完成代码/Editor headless 解析和运行态主链验证，但不把该人工操作替代为自动化通过。
+- UI/UX C4 冻结后已调整：新草稿仅保留 SchemaVersion；费用、目标、效果、所有者、卡池、升级、可用性、预览和 Balance 都从空的“未分配”状态开始，字段校验前不允许写入。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-C5
+
+- `CardDefinitionValidator.TryValidateExecutionPlan()` 成为运行时计划门禁，覆盖 SelectionMode、Scope、数量、重定向策略、连续 Order、效果类型、参数和目标匹配；`TryPrepareCardExecution()` 在任何战斗状态写入前复用该校验。
+- `PlayCard()` 以 `EnemyTurnSnapshot` 事务包裹扣费、效果和移区，并保留旧 trace/resolution 的失败回滚边界；预解析结果的状态指纹或版本变化会被明确拒绝。
+- 编辑器新草稿仅保留 SchemaVersion，新增效果添加/删除入口；保存前额外拒绝不同路径的重复 ID 和对既有资源的误覆盖，继续使用 pending/备份回滚。
+- 验证：Debug/Release build 均 0 警告、0 错误；Godot 4.7 Mono player headless 退出码 0，500-seed MapGraph、CardCatalog、奖励、灵脉和既有状态契约自检 PASS。仍需 QA 严格只读以及可见 Editor 的完整草稿/故障写入窗口复测。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-C6
+
+- 将 Battle 选中/拖拽开始接入 `TryPrepareCardExecution`：UI 保存目标确定时的 `ResolvedCardExecution`，确认、日志和 `GameManager.PlayCard(card, resolved)` 消费同一实例；取消和成功出牌都会清除该实例。
+- 运行时不再以局部 `IsValidCardEffect` 进行简化判断，改为复用 `CardDefinitionValidator.TryValidateExecutionPlan()` 的 TargetPolicy/Order/效果类型与匹配校验。状态版本或指纹不一致会明确拒绝旧解析对象。
+- EditorPlugin 新草稿仅保留 SchemaVersion；补充新增/删除效果入口，保持未分配字段在校验通过前不可写入。
+- 验证：Debug/Release build 均为 0 警告、0 错误；隔离 Godot player headless 退出码 0，CardCatalog、奖励、灵脉和 500-seed MapGraph 自检 PASS。等待 QA 严格只读回归。
+
+---
+
+# 2026-07-20 | 开发部 CARD-DATA-C7
+
+- `CardDefinitionValidator.TryValidateExecutionPlan` 补齐 DurationScope 枚举和效果目标组合校验；Resource/Catalog 验证同时调用此 canonical 语义门禁。
+- 新增并接入 `CardExecutionC7SelfCheck`。首次实际 headless 暴露 `DurationScope=99` 漏检且以退出码 1 失败；补齐后重跑退出码 0，并输出唯一 PASS 标记。
+- Debug build 0 警告/0 错误；隔离 Godot player headless 退出码 0，既有 500-seed、Catalog 和状态契约自检无回归。
+- C7 尚未完成 editor-only 通用持久化事务服务和其 Resource/Catalog/manifest 故障注入自动化；现有 GDScript pending/回滚链仍需 QA 继续作为 P0 审查，不将此条宣称通过。
+
+---
+
+# 2026-07-20 | 开发部 C7R（进行中）
+
+- 新增 `addons/card_authoring/card_authoring_transaction.gd` 并让 dock 的保存入口调用它。事务层独立拒绝新草稿的既有 CardId、既有目标路径和文件存在；编辑草稿必须属于 Catalog；Resource/Catalog 临时写与失败恢复均返回可见结果。
+- Editor headless 退出码 0，插件与 `CardAuthoringTransaction` 解析成功。
+- 尚未完成 C7R 要求的 manifest 资产、通用事务故障注入自检、完整字段表单和 Resolved 最终值封闭验证；本条仅记录进行中的最小事务抽取，禁止送 QA。
+
+## C7R-B1 续作
+
+- `CardAuthoringTransaction` 已升级为 Resource + `CardCatalog.tres` + `resources/cards/CardCatalog.manifest.json` 三件套 pending/提交/回滚。manifest 写入和恢复结果与前两件套一样被检查并包含在错误文本中。
+- Godot Editor headless 退出码 0，事务脚本解析成功。
+- 完整未分配枚举表单、候选 Catalog 全量验证与故障注入自检仍在实现，C7R-B1 未收口、不得送 QA。
+
+## C7R-B1 Schema/Form 续作
+
+- `CardDefinitionResource.EditorDraft` 提供新草稿的显式、可序列化未配置态；既有 `.tres` 缺字段默认为 false，不改变既有 enum 序列化值。canonical validator 拒绝 `EditorDraft=true`。
+- dock 新建草稿设为 EditorDraft；保存前对候选解除标识执行同一 validator，失败恢复草稿标识，成功才转换为生产 Definition。
+- Debug build 0 警告/0 错误。完整字段表单和专用自检尚未完成，本子项仍不得送 QA。
+
+---
+
+# 2026-07-20 | 开发部 C7R-B1-FORM-EFFECT-VERIFY-R1
+
+## 变更
+
+- `CardAuthoringDock` 的 TargetPolicy 读写补齐 `selectionMode`、`scope`、`minimumTargets`、`maximumTargets`、`allowDeadTargets`、`retargetOnInvalid` 六字段；未填写的枚举使用可见“待配置”首项，数值/布尔字段以独立“已配置”标记禁用并提示，避免把 `0` 或 `false` 静默当作有效输入。
+- Effect 编辑补齐 `effectType`、`amount`、`targetSelector`、`statusKind`、`durationScope`、`destinationZone` 的双向绑定。切换当前 Effect 前会写回已配置字段；新 Effect 只包含 `order`，不再创建具有效果语义的默认项。
+- 修复 `OptionButton` 的 pending 项与枚举索引混淆：Dock 用集中映射将首项解释为语义值 `-1`，正式枚举从后续项映射，避免“待配置”被当作枚举 `0` 写入草稿。
+- 移动/删除 Effect 后按当前数组重新写入连续 `order=1..n`，保留其余参数并重设有效选中项。
+- 新增 editor-only `addons/card_authoring/card_authoring_form_selfcheck.gd`。它实际实例化 `CardAuthoringDock.tscn`，检查待配置态、完整 TargetPolicy/Effect 写回，以及双 Effect 重排后的顺序和参数保持；失败调用 `quit(1)`。
+
+## 修改文件
+
+- `addons/card_authoring/CardAuthoringDock.tscn`
+- `addons/card_authoring/card_authoring_dock.gd`
+- `addons/card_authoring/card_authoring_form_selfcheck.gd`
+
+## 验证
+
+- Debug：隔离 `APPDATA/LOCALAPPDATA/DOTNET_CLI_HOME` 后执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，通过，0 警告、0 错误。
+- Release：同环境执行 `dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj`，通过，0 警告、0 错误。
+- Editor 解析：Godot 4.7 Mono Console 使用隔离 `APPDATA/LOCALAPPDATA` 执行 `--path . --editor --headless --quit`，退出码 0，插件和 Dock 场景均可加载。
+- FORM 自检：`--path . --headless --script res://addons/card_authoring/card_authoring_form_selfcheck.gd --quit-after 300`，退出码 0，输出 `[CardAuthoringFormSelfCheck] PASS Dock instance preserves pending fields, bindings, and effect ordering`。
+
+## 残留范围
+
+- 本条只收口 FORM 子项，不代表 C7R-B1 完成。Resource/Catalog/manifest 候选全量验证、故障注入与恢复失败自检仍由后续子项处理。
+- Godot 的 `OptionButton` 原生 `item_id=-1` 被引擎作为自动 ID 保留值；Dock 因此把第一个可见“待配置”项集中映射为语义 `-1`，不将其写入 Resource。
+
+---
+
+# 2026-07-20 | 开发部 UI-REWARD-NODE-IMPLEMENT-R1
+
+## 变更
+
+- 移除 `NodeMapEntry.Configure()` 的绝对 `ZIndex` / `ZAsRelative=false` 设置。本地“继续”现在继承 Battle、Lingmai、Shop 等父页面的内容层级，地图或 CardReward 覆盖时不会再浮到全局最上层。
+- 在 `OverlayCoordinator` 中分离共享地图覆盖平面（`MapCoverZIndex`）。打开地图不再取消或销毁 CardReward；地图在视觉与输入上覆盖当前节点页、胜利弹窗、CardReward 和本地继续，关闭后保留同一个奖励 overlay、RewardPlan、候选顺序与多选进度。
+- 继续保留 TopBar 的 y=0..44 常驻输入区；地图输入阻断从 TopBar 下缘开始。Deck/Settings 仍采用原有可恢复取消 CardReward 逻辑，避免把“地图覆盖”与其他互斥 utility overlay 混为一谈。
+- 扩展 `OverlayCoordinatorSelfCheck`：验证本地入口继承父级层级、文本为“继续”、按下只调用地图开关；验证地图覆盖不取消 CardReward，Deck/Settings 仍通过取消回调恢复奖励行；同时维持 CardReward 高于胜利内容层的输入门禁。
+- 已复核现有 `VictoryRewardList.tscn` 的居中奖励列、灵脉满血休养反馈/消耗、PartyRoster 单人隐藏疗愈入口和页面地图 toggle。它们保持场景/集中规则实现，本轮未引入页面专属结算或 MapScene 路由。
+
+## 修改文件
+
+- `scripts/UI/OverlayCoordinator.cs`
+- `scripts/UI/MapOverlayController.cs`
+- `scripts/UI/NodeMapEntry.cs`
+- `scripts/UI/CardRewardController.cs`
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- Debug：隔离 `APPDATA/LOCALAPPDATA/DOTNET_CLI_HOME` 后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Release：同环境运行 `dotnet build -c Release -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console：隔离 `APPDATA/LOCALAPPDATA` 后运行 `--path . --headless --quit`，退出码 0；`OverlayCoordinatorSelfCheck`、`LingmaiInteractionSelfCheck`、奖励状态机、CardCatalog 与 MapGraph 500-seed 自检均 PASS。
+- Godot Editor headless：`--path . --editor --headless --quit`，退出码 0，项目和 UI 脚本可解析。
+- 入口扫描：未发现 `NodePageMapEntryZIndex`、`ZAsRelative = false`、本地入口文字“地图”、`GoToScene(Map.tscn)`、`OpenMapOnEnter` 或 `CallDeferred(OpenMap...)` 成功路径。命中的“返回地图”仅存在于 Lingmai/Shop/Event 的无效上下文恢复分支，明确调用错误恢复后再开地图，不是正常节点流程。
+
+## 残留风险
+
+- 自动化验证覆盖了协调器契约和真实 headless 自检，仍需用户窗口复测：CardReward 打开时本地继续不可见/不可点而 TopBar 可点；TopBar 打开地图再收起后同一候选和已选进度恢复；胜利、灵脉、商店的本地继续均只开关地图。
+- `MapController` 的道痕固化页仍有旧的动态“继续”按钮，但它只调用 `ToggleMap()`，不涉及节点结算或场景跳转；本轮不扩大到道痕页 UI 重构。
+
+---
+
+# 2026-07-20 | 开发部 C7R-B1-SEMANTIC-FIELDS-R2
+
+## 变更
+
+- CardAuthoring Dock 将 `RewardPoolIds` 改为可见的完整列表编辑：支持逗号或换行输入，写回时去除空白、保留首次出现顺序并去重；新草稿保持空列表和“待配置”状态，不再将空字符串当作已填卡池。
+- 增加并接通 Upgrade 的显式配置开关、`canUpgrade`、`familyId`、`nextCardId` 字段。可升级卡保存完整三元组；不可升级卡也保存显式的 `canUpgrade=false`、空后继和 family，交由同一 validator 校验，不再以隐式 `false/\"\"` 伪默认通过。
+- Preview 增加显式配置开关和 `frameKey` 双向绑定；预览面板显示“待配置”或当前 frameKey，不再从卡名、ID 或资源路径派生预览框。
+- `CardDefinitionValidator` 拒绝重复 RewardPoolIds。`CardDefinitionResource` 提供只读的编辑器校验结果属性，使 Dock 和 editor-only 自检复用唯一 C# validator，而不在 GDScript 复制 Resource 语义校验。
+- 扩展真实 Dock 自检：实例化 `CardAuthoringDock.tscn`，验证 Pool/Upgrade/Preview 初始待配置、两个卡池保序写回和去重、可升级/不可升级两种 Upgrade 结构、缺 Preview/Upgrade/Pool 被 validator 拒绝。
+
+## 修改文件
+
+- `addons/card_authoring/CardAuthoringDock.tscn`
+- `addons/card_authoring/card_authoring_dock.gd`
+- `addons/card_authoring/card_authoring_form_selfcheck.gd`
+- `scripts/Data/CardDefinitionResource.cs`
+- `scripts/Data/CardDefinitionValidator.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- Debug：隔离 `APPDATA/LOCALAPPDATA`，复用本机 `C:\\Users\\ASUS\\.nuget\\packages` 后运行 `dotnet build -p:NuGetAudit=false .\\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Release：同环境运行 `dotnet build -c Release -p:NuGetAudit=false .\\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Dock 自检：Godot 4.7 Mono Console 运行 `--path . --headless --script res://addons/card_authoring/card_authoring_form_selfcheck.gd --quit-after 300`，退出码 0，输出 `[CardAuthoringFormSelfCheck] PASS Dock preserves pending, form, Pool, Upgrade, Preview, and effect ordering`；同时运行现有 500-seed、Catalog 与状态自检。
+- Editor 解析：`--path . --editor --headless --quit`，退出码 0，Dock 与插件可加载。`git diff --check` 退出码 0。
+- 硬编码扫描：Dock 仅引用通用 Catalog/卡牌目录和事务服务；未发现具体卡牌 ID、角色 ID、固定卡池或预览资源路径。`CardCatalog.manifest.json` 是 transaction 服务的通用 manifest 路径，且当前缺失，留给下一事务子项处理。
+
+## 残留范围
+
+- 本条仅完成 C7R-B1 的语义字段子项，不代表 C7R-B1 总体完成。下一子项仍需完成 Resource/Catalog/manifest 候选全量验证、临时写/恢复故障注入和无残留事务自检。
+- 尚未做用户窗口实测；需在 Godot 编辑器内复测完整卡牌的字段编辑、取消、保存与 Catalog 刷新。
+
+---
+
+# 2026-07-20 | 开发部 UI-REWARD-NODE-R2
+
+## 根因与修复
+
+- 根因：`MapOverlayController` 的 TopBar 下方输入屏障使用透明 `ColorRect`；它虽然阻断输入，但地图面板只覆盖 `y=104..976`，使 CardReward 顶部和本地“继续”底部在地图开关期间仍可见。
+- 将该屏障改为集中定义的非透明 `ContentCover`。它从 TopBar 下缘 `y=44` 延伸至屏幕底部，同时承担视觉承载和输入阻断；地图卷轴面板仍保持居中的 `Rect2(64, 104, 1792, 872)` 与左到右揭示，不影响 TopBar 常驻输入。
+- 新增 `MapOverlayController.OpenForSelfCheck()`，仅供启动期自检构造真实地图视觉/输入层级，跳过尚未存在的 RunState MapGraph。`OverlayCoordinatorSelfCheck` 现验证：TopBar 区域未被覆盖、CardReward 与本地继续完整位于实色遮罩内、遮罩阻断输入、关闭地图后仍是同一 CardReward 实例且候选/选择进度不变。
+
+## 修改文件
+
+- `scripts/UI/MapOverlayController.cs`
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- Debug：隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 包缓存，运行 `dotnet build -p:NuGetAudit=false .\\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Release：同环境运行 `dotnet build -c Release -p:NuGetAudit=false .\\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- 隔离 player headless：Godot 4.7 Mono Console 运行 `--path . --headless --quit`，退出码 0；所有现有自检、500-seed MapGraph 与新的 `OverlayCoordinatorSelfCheck PASS` 均通过。
+- 隔离 editor headless：`--path . --editor --headless --quit`，退出码 0，插件和工程场景解析完成。
+- 默认用户环境复现：不覆盖 `APPDATA/LOCALAPPDATA` 时，相同 Godot console 命令在未输出项目日志前卡住，30 秒和 120 秒两次超时后均由 Godot CrashHandler 报 `signal 11`；未复现 QA 所述带 C# `GodotObject.Finalize()` 的 AccessViolation，也没有生成可读项目 crash log。因隔离环境完整通过，当前证据不足以归因项目对象生命周期，不能将默认用户环境的 headless 命令记为 PASS。
+
+## 残留风险
+
+- 用户/QA 仍需窗口实测：打开地图时 CardReward、胜利内容和本地继续均不可见不可点，TopBar 仍可用；关闭地图后同一候选与多选进度恢复。
+- 默认用户环境的 Godot mono headless `signal 11` 仍是外部环境阻断。建议保留上述最小复现命令，并以隔离 `APPDATA/LOCALAPPDATA` 作为当前自动化执行环境；若要彻底归因，需要在用户环境中采集 Godot/Windows crash dump。
+
+---
+
+# 2026-07-22 | ARCH-GOV-001 商店购买原子命令边界
+
+## 变更
+
+- 新增短生命周期、非 Autoload 的 `ShopPurchaseCommand`：由 `ShopController` 在成功生成当前商店库存后创建，冻结每个槽位的 Catalog `DefinitionId` 与价格，并独占已售状态。
+- `TryPurchase(slot)` 会在任何 RunState 写入前校验槽位、售出状态、余额，并用 `CardCatalogService` 创建唯一的运行时卡牌实例。成功时才一次性扣除灵韵、写入永久牌组并标记售出；提交委托异常时恢复灵韵、永久牌组快照和售出标记。
+- `ShopController` 不再直接扣灵韵、调用 `AddCardToDeck` 或维护售出数组；它只提交槽位、展示明确结果并按命令状态刷新商品按钮。
+- 新增 Debug 启动自检，覆盖成功、余额不足、缺失 Catalog 卡和“写牌后抛错”的提交失败回滚路径。
+
+## 修改文件
+
+- `scripts/Core/ShopPurchaseCommand.cs`
+- `scripts/Core/ShopPurchaseCommandSelfCheck.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/UI/ShopController.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 初始 `dotnet build .\AfterHongHuang.csproj` 被用户 NuGet 配置读取权限阻断；使用隔离 `APPDATA/LOCALAPPDATA`、空有效 `NuGet.Config` 和现有 `C:\Users\ASUS\.nuget\packages` 缓存后，`dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj` 退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 隔离环境运行 `--headless --path . --quit` 退出码 0；输出 `[ShopPurchaseCommandSelfCheck] PASS success, insufficient balance, catalog failure and commit rollback`。
+- 购买链静态核对：`ShopController` 仅保留槽位 `BuyCard(index)` 调用；不再存在直接 `LingYun` 写入、`AddCardToDeck` 或 `_sold` 写入。`git diff --check` 退出码 0。
+
+## 残留风险
+
+- 自检以注入的牌组提交委托验证回滚；真实永久牌组 `List.Add` 通常不会抛出，窗口实测仍应确认购买成功、余额不足和 Catalog 资源损坏时页面售出状态与灵韵显示保持一致。
+
+---
+
+# 2026-07-22 | BUG-20260722-001 巫祝初始牌组绑定启动阻断
+
+## 根因与修复
+
+- 根因：生产角色定义已使用 `StarterDeckEntries` 表达 Catalog 卡牌 ID 和重复量，但 `CharacterSelectController` 仍检查迁移期 `StarterDeck` 投影字段，导致巫祝在开始新局前被错误拒绝。
+- `CharacterDeckFactory.TryValidate` 现成为角色选择与新局创建共用的无状态校验入口：生产定义验证每个 `StarterDeckEntries` 条目的 ID、数量、Catalog 投影和执行计划；迁移 fixture 的旧 `StarterDeck` 仍仅限自检使用。
+- 角色选择改为调用该入口，不识别具体角色 ID；`GameManager.StartNewRun` 会在角色和初始牌组均验证成功后才更新当前角色状态，缺失定义或 Catalog 卡时保留明确错误并不启动半成品新局。
+- 扩展现有角色选择绑定自检，验证默认生产角色的 Catalog 配置为拳袭 x4、格挡 x4、烈拳 x1、燃血 x1。
+
+## 修改文件
+
+- `scripts/Core/CharacterDeckFactory.cs`
+- `scripts/Core/CharacterSelectionBindingSelfCheck.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/UI/CharacterSelectController.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 包缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。默认环境仍可能因 NuGet 配置读取权限无法还原 SDK。
+- Godot 4.7 Mono Console 隔离环境运行 `--headless --path . --quit`，退出码 0；`[CharacterSelectionBindingSelfCheck] PASS definition-driven selection`，并通过启动期角色/状态/Catalog 自检。
+- 静态核对：角色选择不再调用 `TryResolveStarterDeck`，而是使用与 `StartNewRun` 共用的 `CharacterDeckFactory.TryValidate`；`git diff --check` 退出码 0。
+
+## 残留风险
+
+- 自动验证覆盖定义绑定和新局初始化；仍需用户窗口从标题选择默认巫祝并确认进入地图，以验证完整场景路由与实际牌组展示。
+
+---
+
+# 2026-07-22 | ARCH-GOV-002 节点页导航边界治理
+
+## 变更
+
+- 新增非 Autoload、随当前节点页销毁的 `NodePageNavigationCoordinator`。Battle、Lingmai、Shop 页面只请求其地图开关；协调器负责持有 Map overlay、在关闭时保留底层页面，并只在地图节点回调后请求核心路由。
+- `GameManager.TryGetNodePageMapInteractivity` 集中判定 Battle 的只读/胜利可推进状态、Lingmai/Shop 的可推进状态和无 ActiveNode 的恢复只读状态。`TryRouteFromNodePage` 是节点页唯一离场命令，关闭 overlay 不会触发它。
+- Battle、Lingmai、Shop 移除了各自的 `MapOverlayController.Open`、目标节点迁移和页面清理回调；Battle 成功路由后的奖励/胜利表现层清理由协调器的成功回调执行。缺失或非法路由会保留当前页面与 overlay，并回传明确错误。
+- 新增聚焦自检，覆盖 Battle 只读地图、Lingmai/Shop 交互地图、空目标路由拒绝和拒绝后 ActiveNode 保持不变。
+
+## 修改文件
+
+- `scripts/Core/NodePageNavigationCoordinator.cs`
+- `scripts/Core/NodePageNavigationSelfCheck.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/UI/BattleController.cs`
+- `scripts/UI/LingmaiController.cs`
+- `scripts/UI/ShopController.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 包缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 隔离环境运行 `--headless --path . --quit`，退出码 0；输出 `[NodePageNavigationSelfCheck] PASS Battle/Lingmai/Shop map access and rejected routes`。
+- 静态核对 Battle、Lingmai、Shop 控制器：不再直接调用 `MapOverlayController.Open`、`TryTransitionAndRoute*`、`ChangeSceneToFile`、`GoToScene` 或 `NodeSceneRouter`。`git diff --check` 退出码 0。
+
+## 残留风险
+
+- 自检验证核心访问与拒绝路由边界；仍需窗口实测 Battle 胜利、Lingmai、Shop 三页各自执行“打开地图 -> 收卷 -> 原页面与奖励/选项/库存状态保持”，以及点击真实合法下一节点后的场景离场。
+
+---
+
+# 2026-07-22 | ARCH-GOV-003 战斗胜利结算命令边界
+
+## 变更
+
+- 新增非 Autoload、短生命周期的 `BattleVictorySettlementCommand`。它只编排现有 `GameManager` 的敌人死亡登记、胜利计划构建与原子暂存，并返回绑定当前节点、遭遇与唯一 `BattleVictoryPlan` 的明确结果对象。
+- `BattleController` 改为只请求命令并呈现结果：成功时绑定已提交计划显示原有胜利页；计划提交失败时显示原有错误页；不再直接写 `BattleOver`、`PlayerWon`、节点结果或奖励状态。
+- 失败登记同样移入 `GameManager.TryRegisterPlayerDefeated`，防止表现层自行提交节点结果。
+- 增加仅 Debug 自检用的一次性胜利计划提交失败注入，验证奖励暂存失败不会写入永久牌组、灵韵或未领取灵韵；敌人死亡时独立完成的节点结果维持既有规则。
+- 新增聚焦自检，覆盖正常胜利、重复请求复用同一已提交计划、缺失活动战斗上下文拒绝，以及提交失败无永久奖励污染。
+
+## 修改文件
+
+- `scripts/Core/BattleVictorySettlementCommand.cs`
+- `scripts/Core/BattleVictorySettlementCommandSelfCheck.cs`
+- `scripts/Core/GameManager.cs`
+- `scripts/UI/BattleController.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 默认 `dotnet build` 仍可能被用户 NuGet 配置读取权限阻断；隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 包缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 在同一隔离环境运行 `--headless --path . --quit`，退出码 0；输出 `[BattleVictorySettlementCommandSelfCheck] PASS normal, duplicate, stale context and commit failure`。
+- 静态核对 `BattleController`：不再命中 `TryRegisterEnemyDefeated`、`TryBuildBattleVictoryPlan`、`TryCommitBattleVictory`、`CreateNodeResult`、`SubmitNodeResult` 或对 `BattleOver` / `PlayerWon` 的直接赋值；`git diff --check` 退出码 0。
+
+## 残留风险
+
+- 自动化覆盖核心命令和状态边界；仍需窗口实测敌人死亡后胜利页、CardReward overlay 与本地“继续”地图入口保持原有呈现和交互。奖励计划异常时应显示错误页且不产生可领取奖励。
+
+---
+
+# 2026-07-22 | ARCH-GOV-004 灵脉与地图操作命令边界
+
+## 变更
+
+- 核对后保留 `MapRenderer`：它只读取 `GameManager` 状态决定按钮可达性，不写 RunState、节点生命周期或路线位置；灵脉路线推进继续由 `GameManager.TryEnterLingmai` 与节点导航端口负责。
+- 新增页面生命周期内的普通核心命令 `LingmaiActionCommand`。休养生息、精进道行和疗愈道友均先验证活动灵脉上下文，再通过 `GameManager` / `PartyRoster` 提交状态并返回不可变呈现结果；满血休养与满血队友疗愈仍是有效的一次性无数值变化行动。
+- `LingmaiController` 改为只请求命令、显示结果并刷新选项；不再直接写玩家生命、灵脉动作消费标记、永久卡牌升级或 `LastLingmaiResult`。
+- 扩展灵脉聚焦自检，覆盖有效灵脉入口的路线推进、满血休养、单人队友目标隐藏、实际队友疗愈、升级、重复行动拒绝，以及无活动/无效地图节点时 RunState 保持不变。
+
+## 修改文件
+
+- `scripts/Core/LingmaiActionCommand.cs`
+- `scripts/Core/LingmaiInteractionSelfCheck.cs`
+- `scripts/UI/LingmaiController.cs`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 包缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 在同一隔离环境运行 `--headless --path . --quit`，退出码 0；输出 `[LingmaiInteractionSelfCheck] PASS full-health rest and roster eligibility`，以及既有节点导航自检 PASS。
+- 静态核对 `LingmaiController` / `MapRenderer`：无玩家生命、地图位置、节点结果、节点推进或 `LastLingmaiResult` 的直接赋值；地图渲染器仅保留当前节点的只读比较。`git diff --check` 退出码 0。
+
+## 残留风险
+
+- 自检覆盖规则端口和失败不变边界；仍需用户窗口确认灵脉页的满血反馈、各行动灰置、多人队友列表及地图关闭后页面状态保持符合预期。
+
+---
+
+# 2026-07-22 | ARCH-GOV-005 卡牌编辑器提交语义校验
+
+## 变更
+
+- 新增纯 C# `CardCatalogSemanticValidator`，统一校验候选 Catalog 路径、Definition/Catalog Schema、运行时执行计划投影及可选 manifest 镜像；运行时 `CardCatalogService` 与编辑器提交共用该入口。
+- 新增仅随 `CardAuthoringDock` 生命周期存在的 `[Tool] CardAuthoringValidationBridge`。GDScript 保存事务只提交 staging 路径、manifest 文本和目标路径；Bridge 在 C# 侧加载强类型 Resource，避免跨语言将 `CardDefinitionResource` 降级为基类 `Resource`。
+- 保存事务改为先写入 `user://card_authoring/staging/<transaction-id>/`，通过桥接校验后才替换正式 Resource、Catalog 与固定路径 `res://resources/cards/CardCatalog.manifest.json`。语义失败不触碰正式三件套；替换失败时逐项回滚并显式返回回滚失败状态。
+- 新增 editor-only 聚焦自检，覆盖合法提交、缺失 TargetPolicy 的语义拒绝，以及 Resource/Catalog/manifest 三个替换阶段的故障回滚。
+
+## 修改文件
+
+- `scripts/Data/CardCatalogSemanticValidator.cs`
+- `scripts/Data/CardCatalogService.cs`
+- `scripts/Data/CardCatalogResource.cs`
+- `scripts/Data/CardDefinitionResource.cs`
+- `scripts/Editor/CardAuthoringValidationBridge.cs`
+- `addons/card_authoring/CardAuthoringDock.tscn`
+- `addons/card_authoring/card_authoring_dock.gd`
+- `addons/card_authoring/card_authoring_transaction.gd`
+- `addons/card_authoring/card_authoring_transaction_selfcheck.gd`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 在同一隔离环境运行 `--headless --editor --path . --script res://addons/card_authoring/card_authoring_transaction_selfcheck.gd`，退出码 0，输出 `[CardAuthoringTransactionSelfCheck] PASS shared semantic validation and three-file rollback`。
+- Godot 4.7 Mono Console 运行 `--headless --path . --quit`，退出码 0；运行时 `CardCatalogSelfCheck` 通过。静态核对 `CardCatalogService` 与 `CardAuthoringValidationBridge` 均调用 `CardCatalogSemanticValidator`；目标文件 `git diff --check` 退出码 0。
+
+## 残留风险
+
+- editor headless 退出码为 0，但 Godot Editor 仍输出既有 RID/ObjectDB 泄漏警告；本轮未证明其由本次 Dock/Bridge 引入。
+- 自动化覆盖了 staging、语义拒绝与文件回滚；仍需用户在 Godot 编辑器中用真实草稿确认字段级错误展示和首次正式 manifest 创建符合预期。
+
+---
+
+# 2026-07-22 | BUGFIX-20260722-UI-EDITOR-001 地图 overlay 与插件加载
+
+## 变更
+
+- 地图 overlay 的 TopBar 下方输入层改为透明 `ContentInputShieldColor`：地图卷轴/面板仍可见并阻断节点页业务输入，但 Battle、Lingmai、Shop、胜利奖励等底层页面不再被不透明全屏底页遮住；关闭地图后保持既有页面与奖励实例。
+- 同步更新 overlay 自检：验证透明输入屏障、TopBar 未覆盖、内容区输入仍受保护，以及地图关闭不取消 CardReward。
+- Card Authoring 的 `plugin.cfg` 将插件脚本改为相对 addon 目录路径 `card_authoring_plugin.gd`，避免 Godot 将 `res://addons/card_authoring/` 与绝对路径重复拼接。
+
+## 修改文件
+
+- `scripts/UI/MapOverlayController.cs`
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+- `addons/card_authoring/plugin.cfg`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 缓存后运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 运行 `--headless --path . --quit`，退出码 0；输出 `[OverlayCoordinatorSelfCheck] PASS modal stack and resolution catalog`。
+- Godot 4.7 Mono Console 运行 `--headless --editor --path . --quit`，退出码 0；完成插件扫描与编辑器布局加载，未见 Card Authoring 重复路径加载错误。
+- 目标文件静态扫描确认插件脚本为相对路径、没有重复 `res://addons/card_authoring/res://` 前缀；`git diff --check` 退出码 0。
+
+## 残留风险
+
+- headless 可以确认配置解析与 Dock 资源扫描，但不能替代窗口内“启用 -> 禁用 -> 再启用”及地图卷轴视觉层次的人工确认。
+
+---
+
+# 2026-07-22 | BUGFIX-20260722-CARD-AUTHORING-UX-001 Dock 反馈、滚动与尺寸适配
+
+## 变更
+
+- 将 Dock 工具栏改为 `HFlowContainer`，窄 Dock 时按钮自动换行，避免固定横向工具栏裁切关键操作。
+- 将 Catalog/字段/预览区域放入 `ContentScroll`；长表单可垂直滚动访问，取消 Catalog 列表的固定宽度下限，保留 `HSplitContainer` 的可调整分栏。
+- 状态区移为 Dock 底部的固定可见 `RichTextLabel` 并启用自身滚动。字段校验、预览/Diff、保存、取消和无草稿反馈均写入该区域；预览/Diff 无草稿时新增明确错误反馈。
+- 扩展现有 Dock 自检，核对垂直滚动路径、状态区归属，以及预览/Diff 与校验失败的可见状态文本；未修改表单字段、保存事务或 C# Tool bridge。
+
+## 修改文件
+
+- `addons/card_authoring/CardAuthoringDock.tscn`
+- `addons/card_authoring/card_authoring_dock.gd`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- Godot 4.7 Mono Console 在隔离环境运行 `--headless --editor --path . --script res://addons/card_authoring/card_authoring_form_selfcheck.gd`，退出码 0，输出 `[CardAuthoringFormSelfCheck] PASS`。
+- 同环境运行 `--headless --editor --path . --script res://addons/card_authoring/card_authoring_transaction_selfcheck.gd`，退出码 0，输出 `[CardAuthoringTransactionSelfCheck] PASS shared semantic validation and three-file rollback`。
+- 目标文件 `git diff --check` 退出码 0。本轮未修改 C#，未重复运行 `dotnet build`。
+
+## 残留风险
+
+- editor headless 能解析 Dock、执行表单与事务自检，但仍需用户在实际 Godot Dock 的宽/窄、高/低尺寸下确认工具栏换行、长表单滚动和多行错误文本的可读性。
+
+---
+
+# 2026-07-27 | TITLE-TECH-001 标题页与共享设置界面去硬编码治理
+
+## 变更
+
+- `TitleController` 改为由 `Title.tscn` 显式注入按钮、版本标签、角色选择 `PackedScene` 与共享设置 `PackedScene`；不再依赖节点层级字符串或角色选择运行时路径。标题页移除时间线按钮及动态占位弹窗。
+- 标题页版本标签只读取 `ProjectSettings.application/config/version`；版本值写入 `project.godot`，场景和 C# 不再保存重复版本字面量。
+- 标题场景改用锚点、`VBoxContainer`、`CenterContainer`、`MarginContainer` 和集中 `TitleTheme.tres` 入口。此轮仅治理装配与响应式结构，未接入视频或最终视觉样式。
+- 新增可复用 `SettingsDialog.tscn` 与 `SettingsDialogController`，承接分辨率、返回标题、退出和关闭输入。`SettingsHelper` 仅负责单实例生命周期、OverlayCoordinator 注册及显式意图路由，不再动态构造控件、样式或文案。
+- Battle、Map、Lingmai、Shop、Event 和 Title 均通过场景导出的同一 `SettingsDialogScene` 调用共享设置入口；缺失装配会记录错误并拒绝创建半成品弹窗。
+
+## 修改文件
+
+- `project.godot`
+- `scripts/UI/TitleController.cs`
+- `scenes/Title/Title.tscn`
+- `scenes/Title/TitleTheme.tres`
+- `scripts/UI/SettingsHelper.cs`
+- `scripts/UI/SettingsDialogController.cs`
+- `scenes/Settings/SettingsDialog.tscn`
+- `scripts/UI/BattleController.cs`
+- `scripts/UI/MapController.cs`
+- `scripts/UI/LingmaiController.cs`
+- `scripts/UI/ShopController.cs`
+- `scripts/UI/EventController.cs`
+- `scenes/Battle/Battle.tscn`
+- `scenes/Map/Map.tscn`
+- `scenes/Lingmai/Lingmai.tscn`
+- `scenes/Shop/Shop.tscn`
+- `scenes/Event/Event.tscn`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 默认 `dotnet build .\AfterHongHuang.csproj` 受用户目录 `NuGet.Config` 读取权限阻断；使用隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`，退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 在隔离用户目录下运行 `--headless --path . --quit`，退出码 0；既有启动自检全部 PASS，未出现标题场景装配错误。
+- 同一环境运行 `--headless --editor --path . --quit`，退出码 0；Title、Settings 及直接调用页面场景通过编辑器扫描/解析。
+- 静态扫描确认：Title/Settings 控制器中无 `GetNode` 层级路径、时间线/占位弹窗、角色选择 `res://` 路径、版本字面量或动态 `AcceptDialog`/控件/主题样式构造；唯一角色选择路径为 `Title.tscn` 的声明式 `PackedScene` 引用。所有设置调用均传递 `SettingsDialogScene`。
+
+## 残留风险
+
+- headless 环境无法验证真实窗口的分辨率变化、系统退出以及标题开始按钮后的可见跳转；需用户窗口手测开始游戏、设置重复打开/关闭、分辨率应用、返回标题和退出。
+- `GameManager.GoToTitle()` 仍是既有核心路由实现；本轮未扩大为全局场景路由改造。
+
+---
+
+# 2026-07-27 | TITLE-TECH-001 用户窗口验收退回修复
+
+## 根因与修复
+
+- `Title.tscn` 使用 PascalCase 写入 C# Node 导出属性，Godot 4.7 Mono 未将 `NodePath` 注入对应 `Button/Label` 属性，`TitleController` 因装配校验失败主动禁用了三个按钮。
+- 标题场景重建时遗漏旧 `Background`、标题和版本的颜色/字体声明；空 `ColorRect` 显示为默认白色，导致标题与版本在窗口中不可见。
+- 保留显式场景装配：`CharacterSelectScene`/`SettingsDialogScene` 使用有效的 C# `PackedScene` 属性；按钮与版本标签改由场景声明的 `unique_name_in_owner` 节点解析（`%StartButton` 等），不依赖脆弱父子层级路径。设置弹窗采用同一方式绑定内部控件。
+- 恢复既有深色背景、金色标题、灰色版本号和基础标题按钮可见性；背景及容器 `MouseFilter=Ignore`，只有按钮接收点击。未恢复时间线、未接入 MP4 或最终视觉样式。
+
+## 修改文件
+
+- `scenes/Title/Title.tscn`
+- `scripts/UI/TitleController.cs`
+- `scenes/Settings/SettingsDialog.tscn`
+- `scripts/UI/SettingsDialogController.cs`
+- `scenes/Battle/Battle.tscn`
+- `scenes/Map/Map.tscn`
+- `scenes/Lingmai/Lingmai.tscn`
+- `scenes/Shop/Shop.tscn`
+- `scenes/Event/Event.tscn`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 运行 `--headless --path . --quit`：退出码 0；不再输出 `[标题] 场景装配无效`，既有 Debug 自检继续通过。
+- Godot 4.7 Mono Console 运行 `--headless --editor --path . --quit`：退出码 0，Title/Settings 及直接调用页面场景解析通过。
+- `git diff --check`：通过。聚焦扫描未发现时间线、旧动态占位弹窗、重复版本号或 Title/Settings 中的运行时 `res://` 场景路径；标题场景仅保留声明式 PackedScene 引用。
+
+## 残留风险
+
+- 当前环境未执行真实窗口点击回归，仍需用户确认深色标题视觉、开始进入角色选择、设置重复打开/关闭与分辨率应用、退出按钮响应。
+
+---
+
+# 2026-07-27 | TITLE-RUNTIME-002 分辨率运行时修复与标题视频接入
+
+## 根因与修复
+
+- `ResolutionSettings.TryApply()` 原先直接向当前宿主请求尺寸并立即校验。窗口处于最大化或全屏时，原生窗口管理器会忽略 `WindowSetSize`；Godot 编辑器嵌入式运行也可能由宿主保持 `1920x1080`，因此用户看到实际尺寸未变。
+- 现在应用目录项前先记录旧尺寸和窗口模式；若不是窗口化，先明确切换至窗口化，再请求尺寸并核验实际尺寸。任何模式切换、尺寸应用或设置文件写入失败都会恢复先前窗口状态，且不会写入持久化配置。
+- 无法接受尺寸请求时，错误反馈明确指出运行宿主限制，并说明编辑器嵌入式游戏需改用独立游戏窗口或导出包测试；不会把失败选择写入配置。
+
+## 标题视频状态
+
+- 最终源文件为 `D:\用户目录\Pictures\comfyUI-Output\video\标题页S2.mp4`，大小 86,595,074 bytes，SHA-256 `8861AD968AC9B07642B9F58A00C6A02C797967BB32B3B5DD69BF4B22CE3CA853`。
+- S2 参数为 3840×2160、16:9、24 fps、32.38 秒；视频为 H.264，音频为 48 kHz 立体声 AAC。
+- 使用工作区临时工具 `D:\GameCode\洪荒之后\.tmp\tooling\ffmpeg\ffmpeg.exe`（FFmpeg 7.1，含 `libtheora`/`libvorbis`）原样转码为 `resources/video/title_background.ogv`。未对 S2 做裁剪、变速、补帧、删帧、倒放或端点处理。
+- OGV 产物为 26,871,574 bytes，SHA-256 `763C71A056ACEEE57F82D9C2ECB713F17E2C0F02ECAEBB4A39B2405326B83B28`；探测参数为 3840×2160、16:9、24 fps、32.38 秒，视频编码 Theora，音频编码 Vorbis、48 kHz 立体声。
+- 美术标题母版目录已替换为唯一正式母版 `洪荒之后-art/assets/ai_source/source/title/标题页s2.mp4`，旧 S1 移至工作区 `.tmp/title-background-s1-replaced.mp4` 作为可恢复备份；未保留两个并列正式母版。
+- 新增 `resources/video/title_background.tres`，显式设置 Theora stream 循环；`Title.tscn` 声明式装配 `VideoStreamPlayer`，节点位于纯色背景之后、标题布局之前，覆盖根 Control，`autoplay=true`、`expand=true`、`mouse_filter=Ignore`。菜单按钮仍由原有 `TitleController` 接收输入。
+
+## 修改文件
+
+- `scripts/UI/ResolutionSettings.cs`
+- `scripts/UI/TitleController.cs`
+- `scenes/Title/Title.tscn`
+- `resources/video/title_background.tres`
+- `resources/video/title_background.ogv`
+- `洪荒之后-art/assets/ai_source/source/title/标题页s2.mp4`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 默认执行 `dotnet build .\AfterHongHuang.csproj`：退出码 1；MSBuild 因拒绝读取 `C:\Users\ASUS\AppData\Roaming\NuGet\NuGet.Config` 无法解析 `Godot.NET.Sdk/4.7.0`，属于用户目录配置访问限制，未由本轮代码引入。
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- FFmpeg 转码命令：`ffmpeg.exe -y -hide_banner -i "D:\用户目录\Pictures\comfyUI-Output\video\标题页S2.mp4" -map 0:v:0 -map 0:a:0 -c:v libtheora -q:v 7 -pix_fmt yuv420p -c:a libvorbis -q:a 5 -f ogv "resources/video/title_background.ogv"`，退出码 0。
+- FFmpeg 对 S2 OGV 完整解码探测：退出码 0；确认 Theora/Vorbis、3840×2160、24 fps、32.38 秒，未发现解码错误。
+- Godot 4.7 Mono Console 隔离运行 `--headless --editor --path . --quit`：退出码 0，Title 场景及 `VideoStreamTheora` 资源解析通过。
+- Godot 4.7 Mono Console 隔离运行 `--headless --path . --quit`：退出码 0，项目启动自检全部通过，未出现标题视频资源加载错误。
+- `TitleController` 增加了仅针对 `%TitleVideo` 节点和 `Stream` 的装配检查，缺失时记录明确错误；不包含媒体路径或视频参数。
+- `git diff --check`：通过；静态核对确认 TitleController 未新增媒体路径，VideoStreamPlayer 使用场景资源引用且忽略鼠标输入。
+- 静态核对确认 `Title.tscn`、`title_background.tres`、`TitleController.cs` 的声明式接入与 Finished 循环逻辑未因母版替换改变。
+
+## 残留风险
+
+- 当前执行环境不能进行独立窗口尺寸切换实测；需用户在独立游戏窗口或导出包中选择 1600x900，确认实际窗口尺寸变更和配置仅在成功后保存。
+
+---
+
+# 2026-07-29 | TITLE-RUNTIME-003 无音轨标题视频替换
+
+## 变更
+
+- 批准源：`D:\用户目录\Pictures\comfyUI-Output\video\标题页成品-无音轨.mp4`，39,394,426 bytes，SHA-256 `AA9D902FE4D11CA023AEB42E4F72FF55BAAC82151E608A62A79B8FF47A21C498`。
+- 源媒体确认只有一个 H.264 视频流：3840×2160、16:9、24 fps、16.21 秒；无音频流。
+- 使用 `D:\GameCode\洪荒之后\.tmp\tooling\ffmpeg\ffmpeg.exe` 仅映射视频流并设置 `-an`，覆盖 `resources/video/title_background.ogv`。未处理音频文件，未修改 `title_background.tres`。
+- 新 OGV：Theora 视频，3840×2160、约 16.21 秒、24 fps，13,414,215 bytes，SHA-256 `57AFC0B7821577A5B6936F50A2BB1AAA21EBBB70697209C35845108DA0F5C10D`；无音频流。
+
+## 修改文件
+
+- `resources/video/title_background.ogv`
+- `docs/开发记录-code.md`
+
+`Title.tscn`、`resources/video/title_background.tres`、`scripts/UI/TitleController.cs` 本轮未修改，现有自动播放、循环、Finished 重播和输入穿透装配保持不变。
+
+## 验证
+
+- FFmpeg 转码命令：`ffmpeg.exe -y -hide_banner -i "D:\用户目录\Pictures\comfyUI-Output\video\标题页成品-无音轨.mp4" -map 0:v:0 -an -c:v libtheora -q:v 7 -pix_fmt yuv420p -f ogv "resources/video/title_background.ogv"`：退出码 0。
+- FFmpeg 对最终 OGV 完整解码到结尾：退出码 0；输出仅有 Theora 视频流，探测显示 `audio:0KiB`。
+- 隔离 APPDATA/LOCALAPPDATA 并复用本机 NuGet 缓存运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：0 警告、0 错误。
+- Godot 4.7 Mono Console：`--headless --editor --path . --quit` 与 `--headless --path . --quit` 均退出码 0。
+- 目标差异检查：仅覆盖运行时 OGV并追加本记录；Title 场景、循环资源、C# 控制器未发生本轮无关修改。
+- `git diff --check`：通过。
+
+## 残留风险
+
+- 未执行真实窗口视觉播放；仍需用户确认约 16.21 秒视频循环、标题按钮可用性和无音轨表现。未启动 QA。
+
+### 标题背景视频循环返工
+
+- 根因：`VideoStreamTheora.loop=true` 在当前 Godot 4.7 .NET 运行链中未使 `VideoStreamPlayer` 在播放结束后重新开始，播放器在一次 `Finished` 后停留在结束位置。
+- `TitleController` 现在只对场景中的同一个 `%TitleVideo` 绑定一次 `Finished`；回调将 `StreamPosition` 设为 0 并调用同一播放器的 `Play()`，不重载场景、不创建第二个播放器、不使用 Timer 或 `_Process` 轮询。
+- `_ExitTree()` 在标题场景销毁时解除该信号，避免跨场景残留连接。重复进入 `_Ready()` 时由连接标记防止重复注册。
+
+## 循环验证
+
+- 隔离环境运行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console：`--headless --editor --path . --quit` 退出码 0；`--headless --path . --quit` 退出码 0。
+- 静态核对 `TitleController.cs`：`Finished +=` 仅绑定一次，`Finished -=` 仅在 `_ExitTree()` 执行；未新增媒体路径、Timer 或 `_Process`。
+
+## 循环返工限制
+
+- headless 可验证脚本编译、场景加载和资源装配，但无法证明持续 20.33 秒后的真实窗口画面循环；需用户保持标题页超过一个视频时长，确认背景无停帧且菜单仍可操作。
+
+---
+
+# 2026-07-29 | TITLE-AUDIO-001 标题页 BGM 运行时接入
+
+## 变更
+
+- 批准源：`D:\用户目录\Music\afterhh\出发-on-the-way.wav`，31,350,156 bytes，SHA-256 `41D41C78F8D15A26199A808278D39E5666540D217979DAB0D8707CEF82501C5B`。
+- 源媒体为 44,100 Hz、立体声、PCM 16-bit，完整时长 `00:02:57.72`，仅含音频流。
+- 使用工作区临时 FFmpeg 7.1 的 `libvorbis` 原样转码为 `resources/audio/music/title_bgm_on_the_way.ogg`，未裁剪、变速或重混；产物为 3,356,136 bytes，SHA-256 `254A371F3DB1C3B617819294C5230D931FFCD1C553B52C3BE2371E50620CD5E1`。
+- `Title.tscn` 新增一个场景内 `AudioStreamPlayer`，引用该 OGG，`autoplay=true`、`volume_db=-6.0`、`bus=&"Master"`；播放器随标题场景销毁，不新增全局音频服务。
+- `title_bgm_on_the_way.ogg.import` 显式设置 `loop=true`、`loop_offset=0`，从 0 秒循环；标题视频及其 Finished 重播逻辑未改动。
+
+## 修改文件
+
+- `resources/audio/music/title_bgm_on_the_way.ogg`
+- `resources/audio/music/title_bgm_on_the_way.ogg.import`
+- `scenes/Title/Title.tscn`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- FFmpeg 完整解码最终 OGG 到结尾：退出码 0；探测为单一 Vorbis 音频流、44,100 Hz、立体声、`00:02:57.72`，无视频流。
+- Godot 4.7 Mono Console `--headless --editor --path . --quit`：退出码 0；音频重新导入、Title 场景解析通过，循环参数保持 `loop=true`/`loop_offset=0`。
+- Godot 4.7 Mono Console `--headless --path . --quit`：退出码 0；现有启动自检通过。引擎退出时仍报告项目既有的对象泄漏警告，但未导致非零退出。
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- `git diff --check`：通过；静态确认 Title 场景仅有一个标题 `AudioStreamPlayer`，TitleController、标题视频和 `title_background.tres` 未作本轮修改。
+
+## 残留风险
+
+- 未执行真实窗口音频播放与跨 2:57.72 的循环实测；需用户在标题页确认 BGM 自动播放、从 0 秒循环、离开标题停止，且菜单/视频行为不受影响。开发完成，待用户验收。
+
+---
+
+# 2026-07-29 | AUDIO-SETTINGS-001 全局音量分层与设置页
+
+## 变更
+
+- 新增 `default_bus_layout.tres`：建立 `Music -> Master`、`SFX -> Master`；`Master` 继续作为总音量层，并在 `project.godot` 注册默认总线布局。
+- 新增 `scripts/Core/AudioSettingsService.cs` 并按批准范围注册为 Autoload。服务只负责三层百分比/显式静音、总线应用、`user://afterhonghuang-settings.cfg` 的 `audio` section 与错误结果；不持有播放器或音乐状态机。
+- 默认音量为 Master `80%`、Music `65%`、SFX `80%`。百分比使用 0~100 线性值，0% 使用可靠静音；显式静音保留百分比，拖动到大于 0% 自动解除该层显式静音。
+- 新增可复用 `VolumeRow.tscn` / `VolumeRowController.cs`，设置场景改为声明式单页 Control overlay，包含声音、显示、右上角关闭和 footer 左侧退出游戏；移除 `AcceptDialog` 底部关闭和“返回标题界面”。Esc、右上角关闭和再次点击共享设置入口均走同一关闭实例路径。
+- `ResolutionSettings` 改为先加载现有配置再写入 `display` section，保留 `audio` section；音频保存同样先加载并保留 `display` section。失败时不报告假成功并恢复本次已改动的实际音量/窗口状态。
+- `Title.tscn` 的唯一标题 BGM 播放器改走 `Music` bus，局部播放器、自动播放、循环和 `-6 dB` 保持不变；未修改音频文件、视频或 `TitleController.cs`。
+
+## 修改文件
+
+- `default_bus_layout.tres`
+- `project.godot`
+- `scripts/Core/AudioSettingsService.cs`（及 Godot 生成的 `.uid`）
+- `scenes/Settings/SettingsDialog.tscn`
+- `scenes/Settings/VolumeRow.tscn`
+- `scripts/UI/SettingsDialogController.cs`（及 Godot 生成的 `.uid`）
+- `scripts/UI/VolumeRowController.cs`（及 Godot 生成的 `.uid`）
+- `scripts/UI/SettingsHelper.cs`
+- `scripts/UI/ResolutionSettings.cs`
+- `scenes/Title/Title.tscn`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console `--headless --editor --path . --quit`：退出码 0；默认总线布局、AudioSettingsService、Title/Settings/VolumeRow 场景解析通过。
+- Godot 4.7 Mono Console `--headless --path . --quit`：退出码 0；现有项目启动自检通过，AudioSettingsService 随 Autoload 初始化。
+- 静态核对确认 `Music`/`SFX` 发送到 `Master`，标题 BGM 唯一播放器使用 `Music`；设置控制器不直接写 AudioServer、分贝换算或配置文件。
+- 静态核对确认设置场景不存在 `ReturnToTitleButton`、`ok_button_text` 或 `AcceptDialog`，共享入口调用仍由 `SettingsHelper.Show` 统一处理。
+- `git diff --check`：通过；未整理或覆盖工作树中与本任务无关的既有修改。
+
+## 残留风险
+
+- 未执行真实窗口试听、三层音量/静音的听感验证、设置入口重复点击与 Esc 的窗口交互验证；需用户在独立窗口中确认默认音量、Master/Music/SFX 串联、0% 静音、重启持久化、1280×720 可读性和关闭路径。开发完成，待用户验收。
+
+- 用户授权返工：设置层已从独占 Window 改为当前页面内 Control overlay；scrim 从 TopBar 下缘 44px 开始，根节点忽略输入以保留 TopBar，右上角/Esc/再次点击设置入口继续共用同一关闭路径。
+
+### 用户窗口反馈返工：三路绑定、静音控件与动态遮罩
+
+- 根因：`VolumeRow.tscn` 实例覆盖使用了 `display_label/channel`，没有写入 C# 导出的 `DisplayLabel/Channel`，三行因此都保留同一默认绑定；同时共享设置场景固定从 44px 开始遮罩，标题页顶部出现缝隙。
+- 修复：三个实例改为显式 `DisplayLabel/Channel`（总音量/Master、音乐/Music、音效/Sfx）；`SettingsDialogController` 在接线前校验三行存在、顺序和唯一通道，`VolumeRowController` 拒绝缺失标签。每行事件继续携带自身 `AudioChannel`，不修改 `AudioSettingsService`。
+- 静音控件改为“静音”Label 后的无文字 40×40 `CheckBox`；正常音频状态清空并隐藏，只有服务/保存失败显示错误；设置页退出游戏按钮及 `QuitRequested/QuitApplication` 链已移除，标题页独立退出按钮不变。
+- `SettingsHelper` 通过宿主直接子节点的 `TopBar` 类型读取当前尺寸、最小尺寸和合并最小尺寸，调用控制器接口设置 scrim 顶部边界；无 TopBar 为 0，带 TopBar 使用实际高度。根节点继续 Ignore，scrim 继续 Stop。
+
+## 本轮验证
+
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console `--headless --editor --path . --quit`：退出码 0；Settings/VolumeRow/Title 资源与 C# 导出属性解析通过。
+- Godot 4.7 Mono Console `--headless --path . --quit`：退出码 0；既有项目自检通过。
+- 静态聚焦检查：三行绑定唯一、CheckBox 位于静音文字之后且具 40px 热区；无旧小写覆盖、固定 44px scrim、设置页退出链或正常成功占位文案；TopBar inset 只按类型解析；`git diff --check` 通过。
+
+## 本轮限制
+
+- 未执行用户窗口点击/听感复测；仍需确认三路滑块与静音分别生效、标题页全屏遮罩、游戏页面 TopBar 可点、右上角/Esc/重复入口关闭及 1280×720 布局。Godot headless 仍输出项目既有对象泄漏警告，但退出码为 0。
+
+---
+
+# 2026-07-29 | TITLE-RUNTIME-003 用户窗口返工：倒放标题视频无音轨替换
+
+## 变更
+
+- 批准源：`D:\用户目录\Pictures\comfyUI-Output\video\标题页已倒放-未去音轨.mp4`；大小 `86,595,074` bytes，SHA-256 `8861AD968AC9B07642B9F58A00C6A02C797967BB32B3B5DD69BF4B22CE3CA853`。
+- 使用工作区 `D:\GameCode\洪荒之后\.tmp\tooling\ffmpeg\ffmpeg.exe`（FFmpeg 7.1）执行视频流直拷并显式排除音频：`-map 0:v:0 -c:v copy -an`；生成中间文件 `D:\GameCode\洪荒之后\.tmp\title-background-reversed-noaudio.mp4`。
+- 派生 MP4 大小 `86,065,138` bytes，SHA-256 `0514FAE87D4BC76C7EC7722C438731503BECEE1D923552F50374EF347B56024F`；保留 H.264、3840×2160、24fps、16:9、32.38秒视频参数，移除音频流。
+- 由派生 MP4 转换并覆盖 `resources/video/title_background.ogv`；仅含 Theora 视频流，3840×2160、24fps、32.38秒。正式 OGV 大小 `26,448,917` bytes，SHA-256 `AA4492CDD4C622354193C68831ECF1FB8D535D9B117F4B50850E93B9416194E7`。
+- 本批次未修改 `title_background.tres`、`Title.tscn`、`TitleController.cs`、标题 BGM、设置或 art 工作树；继续复用既有循环、自动播放、Music 路由和按钮装配。
+
+## 验证
+
+- FFmpeg 派生 MP4 完整解码：退出码 0；音频流映射返回 `-22`（无匹配音频流）。
+- FFmpeg 正式 OGV 完整解码：退出码 0；流报告为 `Video: theora`，音频流映射返回 `-22`。
+- 隔离 `APPDATA/LOCALAPPDATA` 并复用本机 NuGet 缓存执行 `dotnet build -p:NuGetAudit=false .\AfterHongHuang.csproj`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console：`--headless --editor --path . --quit` 与 `--headless --path . --quit` 均退出码 0；玩家自检 PASS。退出时仍报告项目既有的 4 个 ObjectDB 泄漏和 2 个资源占用警告，但未导致非零退出。
+- 静态核对：`Title.tscn` 仍为单一 `VideoStreamPlayer`/标题 BGM 播放器；视频 `mouse_filter=2`、`autoplay=true`，BGM 使用 `Music`；`TitleController.cs` 仍只绑定一次 `Finished`，并保留 `StreamPosition=0` 后 `Play()`；按钮与设置 PackedScene 引用未改动。
+- `git diff --check`：通过。
+
+## 限制与风险
+
+- 当前工作区没有 `ffprobe.exe`，媒体流与参数使用 FFmpeg 7.1 的输入/解码报告及显式 stream map 验证；未伪造 ffprobe 结果。
+- 未执行持续窗口播放和视觉验收；需用户确认标题页显示倒放视频、循环衔接、菜单可操作及 BGM/设置行为。开发完成，待用户验收。

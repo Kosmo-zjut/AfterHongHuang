@@ -22,8 +22,15 @@ public static class ResolutionSettings
     public static void ApplyPersistedAtStartup()
     {
         var config = new ConfigFile();
-        if (config.Load(SettingsPath) != Error.Ok ||
-            !config.HasSectionKey(SettingsSection, WidthKey) ||
+        Error loadResult = config.Load(SettingsPath);
+        if (loadResult == Error.FileNotFound)
+            return;
+        if (loadResult != Error.Ok)
+        {
+            GD.PrintErr($"[设置] 读取已保存的显示设置失败：{loadResult}。");
+            return;
+        }
+        if (!config.HasSectionKey(SettingsSection, WidthKey) ||
             !config.HasSectionKey(SettingsSection, HeightKey))
             return;
 
@@ -51,6 +58,7 @@ public static class ResolutionSettings
     public static bool TryApply(int index, out Vector2I appliedSize, out string error)
     {
         Vector2I previousSize = DisplayServer.WindowGetSize();
+        DisplayServer.WindowMode previousMode = DisplayServer.WindowGetMode();
         appliedSize = previousSize;
         error = "";
         if (index < 0 || index >= SupportedOptions.Count)
@@ -68,23 +76,44 @@ public static class ResolutionSettings
 
         var option = SupportedOptions[index];
         var desired = new Vector2I(option.Width, option.Height);
-        DisplayServer.WindowSetSize(desired);
-        appliedSize = DisplayServer.WindowGetSize();
-        if (appliedSize != desired)
+        var config = new ConfigFile();
+        Error loadResult = config.Load(SettingsPath);
+        if (loadResult != Error.Ok && loadResult != Error.FileNotFound)
         {
-            string restoreError = RestoreWindowSize(previousSize);
-            appliedSize = DisplayServer.WindowGetSize();
-            error = $"窗口管理器未接受 {option.Width}×{option.Height}，实际为 {appliedSize.X}×{appliedSize.Y}。{restoreError}";
+            error = $"读取用户设置文件失败：{loadResult}。";
             GD.PrintErr($"[设置] {error}");
             return false;
         }
 
-        var config = new ConfigFile();
+        if (previousMode != DisplayServer.WindowMode.Windowed)
+        {
+            // A maximized or fullscreen native window ignores WindowSetSize. Normalize the mode
+            // first so a successful selection has a real, independently sized game window.
+            DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
+            if (DisplayServer.WindowGetMode() != DisplayServer.WindowMode.Windowed)
+            {
+                error = DescribeHostRejection(option, previousMode, previousSize);
+                GD.PrintErr($"[设置] {error}");
+                return false;
+            }
+        }
+
+        DisplayServer.WindowSetSize(desired);
+        appliedSize = DisplayServer.WindowGetSize();
+        if (appliedSize != desired)
+        {
+            string restoreError = RestoreWindowState(previousSize, previousMode);
+            appliedSize = DisplayServer.WindowGetSize();
+            error = DescribeHostRejection(option, previousMode, appliedSize) + restoreError;
+            GD.PrintErr($"[设置] {error}");
+            return false;
+        }
+
         config.SetValue(SettingsSection, WidthKey, option.Width);
         config.SetValue(SettingsSection, HeightKey, option.Height);
         if (config.Save(SettingsPath) != Error.Ok)
         {
-            string restoreError = RestoreWindowSize(previousSize);
+            string restoreError = RestoreWindowState(previousSize, previousMode);
             appliedSize = DisplayServer.WindowGetSize();
             error = $"保存用户设置文件失败，窗口已恢复至 {appliedSize.X}×{appliedSize.Y}。{restoreError}";
             GD.PrintErr($"[设置] {error}");
@@ -95,13 +124,29 @@ public static class ResolutionSettings
         return true;
     }
 
-    private static string RestoreWindowSize(Vector2I previousSize)
+    /// <summary>
+    /// Restores the prior native window state when a resize or settings-file write fails. The
+    /// persisted configuration is written only after this method is no longer needed.
+    /// </summary>
+    private static string RestoreWindowState(Vector2I previousSize, DisplayServer.WindowMode previousMode)
     {
+        DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
         DisplayServer.WindowSetSize(previousSize);
+        if (previousMode != DisplayServer.WindowMode.Windowed)
+            DisplayServer.WindowSetMode(previousMode);
+
         Vector2I restoredSize = DisplayServer.WindowGetSize();
         return restoredSize == previousSize
             ? ""
             : $" 尝试恢复至 {previousSize.X}×{previousSize.Y} 失败，实际为 {restoredSize.X}×{restoredSize.Y}。";
+    }
+
+    private static string DescribeHostRejection(ResolutionOption option, DisplayServer.WindowMode previousMode,
+        Vector2I actualSize)
+    {
+        return $"运行宿主未接受 {option.Width}×{option.Height} 的窗口尺寸请求，实际为 " +
+            $"{actualSize.X}×{actualSize.Y}（原窗口模式：{previousMode}）。" +
+            "若当前从 Godot 编辑器的嵌入式游戏窗口运行，请改用独立游戏窗口或导出包测试分辨率。";
     }
 
     /// <summary>Resolves the current window size to one catalog item when possible.</summary>

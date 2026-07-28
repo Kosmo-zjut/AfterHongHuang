@@ -121,7 +121,8 @@ public static class RewardBindingSelfCheck
             {
                 RewardId = validRewardId,
                 GrantType = RewardGrantType.Card,
-                Card = fixtureCharacter.StarterDeck[0],
+                // 领取自检必须使用生产 Catalog 候选；fixture 卡仅用于角色定义反证，不能绕过执行计划门禁。
+                Card = basePlan.Candidates[0],
             }, out var grantError), grantError);
         Ensure(manager.GetDeckSize() == deckBeforeValid + 1, "有效卡牌奖励未增加永久牌组");
         Ensure(manager.TryCreateRewardId("lingyun", "fixture", out var validLingYunId, out idError), idError);

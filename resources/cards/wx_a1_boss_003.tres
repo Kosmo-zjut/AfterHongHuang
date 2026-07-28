@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="CardDefinitionResource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/Data/CardDefinitionResource.cs" id="1"]
+[resource]
+script = ExtResource("1")
+Id = "wx_a1_boss_003"
+DisplayName = "浊潮蚀骨"
+DescriptionFallback = "给予目标敌人6层永炎"
+OwnerCharacterId = "wuzhu"
+Category = 1
+Rarity = 3
+Costs = [{ "costType": 0, "amount": 2, "timing": 0, "failurePolicy": 0, "canCauseDefeat": false }]
+TargetPolicy = { "selectionMode": 2, "scope": 2, "minimumTargets": 1, "maximumTargets": 1, "allowDeadTargets": false, "retargetOnInvalid": 0 }
+Effects = [{ "order": 1, "effectType": 3, "targetSelector": 0, "amount": 6, "statusKind": 3, "durationScope": 2, "destinationZone": 0 }]
+RewardPoolIds = ["boss_rewards"]
+Upgrade = { "canUpgrade": false, "nextCardId": "", "familyId": "wx_a1_boss_003" }
+Tags = ["wuzhu", "boss", "eternal_flame"]
+Availability = { "minContentVersion": "1.0.0" }
+Preview = { "frameKey": "boss_card" }
+Balance = { "role": "boss_dot" }

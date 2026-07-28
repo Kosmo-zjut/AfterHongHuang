@@ -11,14 +11,20 @@ config_version=5
 [application]
 
 config/name="AfterHongHuang"
-config/description="洪荒之后 - 一款基于 Godot 4.7 开发的游戏"
+config/version="0.0.1-alpha"
+config/tags=PackedStringArray("代码")
 run/main_scene="res://scenes/Title/Title.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 
+[audio]
+
+default_bus_layout="res://default_bus_layout.tres"
+
 [autoload]
 
 GameManager="*res://scripts/Core/GameManager.cs"
+AudioSettingsService="*res://scripts/Core/AudioSettingsService.cs"
 
 [display]
 
@@ -32,6 +38,10 @@ window/stretch/aspect="expand"
 [dotnet]
 
 project/assembly_name="AfterHongHuang"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/card_authoring/plugin.cfg")
 
 [physics]
 

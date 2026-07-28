@@ -1,4 +1,5 @@
 using Godot;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -28,8 +29,11 @@ public partial class GameManager : Node
     private BattleVictoryPlan _pendingBattleVictorySnapshot;
     private VictorySnapshot _victoryTransactionSnapshot;
     private readonly Dictionary<string, HashSet<int>> _claimedRewardCandidates = new();
+    private readonly List<CardExecutionTraceEntry> _lastCardExecutionTrace = new();
+    private ResolvedCardExecution _lastResolvedCardExecution;
 #if DEBUG
     private bool _injectBattleExitFailureForSelfCheck;
+    private bool _injectBattleVictoryCommitFailureForSelfCheck;
 #endif
 
     /// <summary>当前一局的持久状态。战斗离场时该对象继续存在。</summary>
@@ -46,6 +50,9 @@ public partial class GameManager : Node
 
     /// <summary>当前战斗临时状态；战斗结束/离场后销毁。</summary>
     public BattleState ActiveBattle => _activeBattle;
+    /// <summary>最近一次出牌实际消费的有序效果，日志和自动化可用来核对执行事实。</summary>
+    public IReadOnlyList<CardExecutionTraceEntry> LastCardExecutionTrace => _lastCardExecutionTrace;
+    public ResolvedCardExecution LastResolvedCardExecution => _lastResolvedCardExecution;
 
     /// <summary>当前胜利结算持有的唯一奖励计划；未完成胜利事务时为空。</summary>
     public BattleVictoryPlan ActiveBattleVictoryPlan => _activeBattleVictoryPlan;
@@ -84,6 +91,9 @@ public partial class GameManager : Node
 
     // 道痕和地图进度属于 RunState。
     public List<DaoMarkInfo> DaoMarks => _runState.DaoMarks;
+    /// <summary>Queries real non-self allies eligible for the Lingmai healing action.</summary>
+    public IReadOnlyList<PartyMember> GetEligibleLingmaiHealingTargets() =>
+        _runState.Party.GetEligibleHealingTargets(CharacterId);
     public bool DaoMarkSelected { get => _runState.DaoMarkSelected; set => _runState.DaoMarkSelected = value; }
     public List<DaoMarkInfo> CurrentChoices
     {
@@ -165,9 +175,15 @@ public partial class GameManager : Node
             RewardBindingSelfCheck.Run();
             CharacterSelectionBindingSelfCheck.Run();
             RewardStateMachineSelfCheck.Run();
+            BattleVictorySettlementCommandSelfCheck.Run();
+            CardCatalogSelfCheck.Run();
+            CardExecutionC7SelfCheck.Run();
             NodeContentBindingSelfCheck.Run();
             EventEffectSelfCheck.Run();
             OverlayCoordinatorSelfCheck.Run();
+            LingmaiInteractionSelfCheck.Run();
+            ShopPurchaseCommandSelfCheck.Run();
+            NodePageNavigationSelfCheck.Run();
         }
         catch (System.Exception error)
         {
@@ -188,19 +204,21 @@ public partial class GameManager : Node
     /// <summary>使用显式 run seed 开始新局，供确定性测试和后续发布复现使用。</summary>
     public bool StartNewRun(string characterId, ulong runSeed)
     {
-        CharacterId = characterId;
         if (!DataDefs.TryGetCharacterDefinition(characterId, out var character))
         {
             GD.PrintErr($"[GameManager] 未找到角色：{characterId}");
             return false;
         }
-        SelectedCharacter = character;
 
-        if (!CharacterDeckFactory.TryCreate(SelectedCharacter, out var starterDeck, out var starterDeckError))
+        if (!CharacterDeckFactory.TryCreate(character, out var starterDeck, out var starterDeckError))
         {
             GD.PrintErr($"[GameManager] 新局牌组解析失败：{starterDeckError}");
             return false;
         }
+
+        // No visible run state changes until both the character and its Catalog-backed deck exist.
+        CharacterId = characterId;
+        SelectedCharacter = character;
 
         DisposeBattleState();
         ActiveNode = null;
@@ -225,6 +243,7 @@ public partial class GameManager : Node
         _runState.MapGraph = generatedGraph;
         _runState.PermanentDeck.Clear();
         _runState.DaoMarks.Clear();
+        _runState.Party.Clear();
         _runState.CurrentChoices.Clear();
         _runState.NodeStates.Clear();
         _runState.CompletedNodeIds.Clear();
@@ -311,17 +330,35 @@ public partial class GameManager : Node
     public bool PlayCard(CardRuntime card)
     {
         if (!Hand.Contains(card)) return false;
-        if (card.Info.Cost > PlayerLingli) return false;
+        if (!TryPrepareCardExecution(card, out var resolved, out var prepareError))
+        {
+            GD.PrintErr($"[GameManager] 出牌被阻止：{prepareError}");
+            return false;
+        }
+        return PlayCard(card, resolved);
+    }
 
-        PlayerLingli -= card.Info.Cost;
-        ExecuteCardEffect(card);
+    /// <summary>仅消费玩家确认时冻结的同一解析对象；不允许执行端重新计算卡牌事实。</summary>
+    public bool PlayCard(CardRuntime card, ResolvedCardExecution resolved)
+    {
+        if (!Hand.Contains(card) || resolved == null) return false;
+        if (resolved.Plan.EnergyCost > PlayerLingli) return false;
+
+        var snapshot = EnemyTurnSnapshot.Capture(this);
+        PlayerLingli -= resolved.Plan.EnergyCost;
+        if (!TryExecuteResolvedCard(card, resolved, out var exhausts, out var executionError))
+        {
+            snapshot.Restore(this);
+            GD.PrintErr($"[GameManager] 出牌执行被阻止：{executionError}");
+            return false;
+        }
 
         // 出牌可能改变敌方护体破盾/当前效果条件，下一次 UI 刷新必须重新解析预告。
         if (_activeBattle != null)
             _activeBattle.PreparedEnemyIntent = null;
 
         Hand.Remove(card);
-        if (card.Info.Exhausts)
+        if (exhausts)
             ExhaustPile.Add(card);
         else
             DiscardPile.Add(card);
@@ -330,32 +367,95 @@ public partial class GameManager : Node
         return true;
     }
 
-    private void ExecuteCardEffect(CardRuntime card)
+    /// <summary>将目标条件和当前战斗快照冻结为唯一执行事实，UI 确认提示可直接消费 Summary。</summary>
+    public bool TryPrepareCardExecution(CardRuntime card, out ResolvedCardExecution resolved, out string error)
     {
-        var info = card.Info;
-
-        if (info.SelfDamage > 0)
+        resolved = null;
+        error = "";
+        if (card == null || card.ExecutionPlan == null || card.Info == null)
         {
-            PlayerHp -= info.SelfDamage;
-            PlayerHp = Mathf.Max(PlayerHp, 0);
+            error = "卡牌缺少已验证执行计划。";
+            return false;
         }
-
-        switch (info.Type)
+        var plan = card.ExecutionPlan;
+        if (!string.Equals(card.Info.DefinitionId ?? card.Info.Id, plan.CardId, System.StringComparison.Ordinal))
         {
-            case CardType.斗击:
-                ExecuteAttackCard(card);
-                break;
-            case CardType.术法:
-                ExecuteSkillCard(card);
-                break;
+            error = "卡牌兼容投影与执行计划身份不匹配。";
+            return false;
         }
+        if (!CardDefinitionValidator.TryValidateExecutionPlan(plan, out var planError))
+        {
+            error = $"执行计划校验失败：{planError}";
+            return false;
+        }
+        if (plan.TargetPolicy.Scope == CardTargetScope.SingleEnemy && EnemyHp <= 0)
+        {
+            error = "敌方目标不可用。";
+            return false;
+        }
+        if (plan.TargetPolicy.Scope is not (CardTargetScope.None or CardTargetScope.Self or CardTargetScope.SingleEnemy))
+        {
+            error = "执行计划包含未支持目标范围。";
+            return false;
+        }
+        resolved = new ResolvedCardExecution(plan, _activeBattle?.IntentStateVersion ?? 0,
+            BuildCardStateFingerprint(), CardExecutionPlanFormatter.Format(plan));
+        return true;
     }
 
-    private void ExecuteAttackCard(CardRuntime card)
+    /// <summary>按冻结计划的顺序执行效果；旧 CardInfo 聚合字段只供兼容卡面展示。</summary>
+    private bool TryExecuteResolvedCard(CardRuntime card, ResolvedCardExecution resolved, out bool exhausts, out string error)
     {
-        var info = card.Info;
+        exhausts = false;
+        error = "";
+        if (resolved == null || !ReferenceEquals(resolved.Plan, card.ExecutionPlan) ||
+            resolved.BattleStateVersion != (_activeBattle?.IntentStateVersion ?? 0) ||
+            resolved.StateFingerprint != BuildCardStateFingerprint())
+        {
+            error = "出牌解析结果已失效，拒绝执行旧计划。";
+            return false;
+        }
+        _lastCardExecutionTrace.Clear();
+        foreach (var effect in resolved.Plan.Effects)
+        {
+            _lastCardExecutionTrace.Add(new CardExecutionTraceEntry
+            {
+                Order = effect.Order,
+                EffectType = effect.EffectType,
+                Amount = effect.Amount,
+            });
+            switch (effect.EffectType)
+            {
+                case CardEffectKind.LoseHealth:
+                    PlayerHp = Mathf.Max(PlayerHp - effect.Amount, 0);
+                    break;
+                case CardEffectKind.DealDamage:
+                    ExecuteDamageEffect(effect.Amount);
+                    break;
+                case CardEffectKind.GainBlock:
+                    PlayerHuti += effect.Amount;
+                    break;
+                case CardEffectKind.AddStatus:
+                    if (!TryApplyCardStatus(effect, out error)) return false;
+                    break;
+                case CardEffectKind.MoveSelfToZone when effect.DestinationZone == CardDestinationZone.Exhaust:
+                    exhausts = true;
+                    break;
+                default:
+                    error = $"执行计划包含未支持效果：{effect.EffectType}";
+                    return false;
+            }
+        }
+        _lastResolvedCardExecution = resolved;
+        return true;
+    }
 
-        float baseDamage = info.Value + PlayerDoujin;
+    private string BuildCardStateFingerprint() => _activeBattle == null ? "no-battle" :
+        $"{_activeBattle.IntentStateVersion}|{PlayerHp}|{PlayerLingli}|{PlayerHuti}|{PlayerDoujin}|{EnemyHp}|{EnemyHuti}|{EnemyYirong}|{EnemyYongyan}|{_activeBattle.EnemyMechanicActive}";
+
+    private void ExecuteDamageEffect(int baseValue)
+    {
+        float baseDamage = baseValue + PlayerDoujin;
         float damage = baseDamage;
 
         if (EnemyYirong > 0)
@@ -393,27 +493,25 @@ public partial class GameManager : Node
         if (_activeBattle != null)
             _activeBattle.PlayerAttackedThisTurn = true;
 
-        if (info.HasSecondary && info.SecondaryType == SecondaryEffect.易损)
-        {
-            EnemyYirong += info.SecondaryValue;
-        }
     }
 
-    private void ExecuteSkillCard(CardRuntime card)
+    private bool TryApplyCardStatus(CardEffectDefinition effect, out string error)
     {
-        var info = card.Info;
-
-        if (info.SelfGuardValue > 0)
-            PlayerHuti += info.SelfGuardValue;
-
-        if (info.HasSecondary && info.SecondaryType == SecondaryEffect.斗劲)
+        error = "";
+        switch (effect.StatusKind)
         {
-            PlayerDoujin += info.SecondaryValue;
-        }
-
-        if (info.HasSecondary && info.SecondaryType == SecondaryEffect.永炎)
-        {
-            EnemyYongyan += info.SecondaryValue;
+            case CardStatusKind.Strength when effect.TargetSelector == CardEffectTarget.Self:
+                PlayerDoujin += effect.Amount;
+                return true;
+            case CardStatusKind.Vulnerable when effect.TargetSelector == CardEffectTarget.SelectedTarget:
+                EnemyYirong += effect.Amount;
+                return true;
+            case CardStatusKind.EternalFlame when effect.TargetSelector == CardEffectTarget.SelectedTarget:
+                EnemyYongyan += effect.Amount;
+                return true;
+            default:
+                error = $"状态效果目标或类型不受支持：{effect.StatusKind}/{effect.TargetSelector}";
+                return false;
         }
     }
 
@@ -1257,7 +1355,7 @@ public partial class GameManager : Node
         };
 
         foreach (var card in _runState.PermanentDeck)
-            _activeBattle.DrawPile.Add(new CardRuntime { Info = card.Info });
+            _activeBattle.DrawPile.Add(card.Clone());
 
         ShuffleBattleDrawPile();
         foreach (var dm in DaoMarks)
@@ -1518,6 +1616,9 @@ public partial class GameManager : Node
 #if DEBUG
     /// <summary>仅供 Debug 自检注入一次离场失败，不提供正式玩法入口。</summary>
     internal void InjectBattleExitFailureForSelfCheck() => _injectBattleExitFailureForSelfCheck = true;
+
+    /// <summary>仅供 Debug 自检验证胜利计划提交失败不污染永久奖励状态。</summary>
+    internal void InjectBattleVictoryCommitFailureForSelfCheck() => _injectBattleVictoryCommitFailureForSelfCheck = true;
 #endif
 
     /// <summary>灵脉结果提交后统一清理节点并返回地图。</summary>
@@ -1632,6 +1733,74 @@ public partial class GameManager : Node
     /// </summary>
     public bool TryTransitionAndRouteFromCompletedNode(MapNodeDefinition target, out string error) =>
         TryTransitionFromCompletedNodeInternal(target, routeToTarget: true, out error);
+
+    /// <summary>
+    /// Returns whether a node page may show a map and whether its map may advance the route.
+    /// This is the shared state decision used by Battle, Lingmai and Shop page coordinators.
+    /// </summary>
+    public bool TryGetNodePageMapInteractivity(out bool interactive, out string error)
+    {
+        interactive = false;
+        error = "";
+        if (MapGraph == null)
+        {
+            error = "RunState 缺少生产 MapGraph，拒绝打开节点页地图。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+
+        // Invalid-entry recovery may have cleared ActiveNode. It can inspect the map but cannot
+        // route again until a page has entered a valid node context.
+        if (ActiveNode == null)
+            return true;
+
+        if (_activeBattle != null)
+        {
+            interactive = _activeBattle.BattleOver && _activeBattle.PlayerWon &&
+                CurrentState == PlayerState.战斗胜利结算 && _activeResultSubmitted;
+            return true;
+        }
+
+        bool activeService = !_activeResultSubmitted &&
+            (CurrentState == PlayerState.灵脉中 || CurrentState == PlayerState.商店中) &&
+            (ActiveNode.NodeType == MapGraphNodeType.Lingmai || ActiveNode.NodeType == MapGraphNodeType.Shop);
+        if (activeService)
+        {
+            interactive = true;
+            return true;
+        }
+
+        error = $"当前节点页状态不支持地图导航：{ActiveNode.NodeType}/{CurrentState}";
+        GD.PrintErr($"[GameManager] {error}");
+        return false;
+    }
+
+    /// <summary>
+    /// The only node-page route command. It is called exclusively after a shared map overlay
+    /// reports a legal target click; closing the map never reaches this method.
+    /// </summary>
+    public bool TryRouteFromNodePage(MapNodeDefinition target, out string error)
+    {
+        if (target == null)
+        {
+            error = "地图目标节点为空，拒绝离开当前节点页。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+
+        if (_activeBattle != null)
+            return TryTransitionAndRouteFromCompletedNode(target, out error);
+
+        bool activeService = ActiveNode != null && !_activeResultSubmitted &&
+            (CurrentState == PlayerState.灵脉中 || CurrentState == PlayerState.商店中) &&
+            (ActiveNode.NodeType == MapGraphNodeType.Lingmai || ActiveNode.NodeType == MapGraphNodeType.Shop);
+        if (activeService)
+            return TryTransitionAndRouteFromActiveServiceNode(target, out error);
+
+        error = "当前节点页不允许通过地图离场。";
+        GD.PrintErr($"[GameManager] {error}");
+        return false;
+    }
 
     /// <summary>
     /// Leaves an active Lingmai or Shop page only after the player selects a legal next map node.
@@ -2098,6 +2267,56 @@ public partial class GameManager : Node
         return true;
     }
 
+    /// <summary>
+    /// Records a player defeat through the same node-result boundary as victory. Presentation controllers must not
+    /// mutate BattleOver/PlayerWon or submit defeat results directly.
+    /// </summary>
+    public bool TryRegisterPlayerDefeated(out string error)
+    {
+        error = "";
+        if (_activeBattle == null || ActiveNode == null || ActiveEncounter == null)
+        {
+            error = "玩家失败登记缺少活动战斗上下文。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+        if (PlayerHp > 0)
+        {
+            error = "玩家仍有生命，不能登记战斗失败。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+        if (_activeBattle.BattleOver)
+        {
+            if (_activeBattle.PlayerWon)
+            {
+                error = "战斗已经以胜利终止，不能覆盖为失败。";
+                GD.PrintErr($"[GameManager] {error}");
+                return false;
+            }
+            if (_activeResultSubmitted)
+                return true;
+
+            error = "战斗失败状态缺少已提交节点结果。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+
+        _activeBattle.BattleOver = true;
+        _activeBattle.PlayerWon = false;
+        _activeBattle.IsPlayerTurn = false;
+        CurrentState = PlayerState.战斗中;
+        var result = CreateNodeResult(NodeResultType.Defeated, "战斗失败", out error);
+        if (result == null || !SubmitNodeResult(result, out error))
+        {
+            if (string.IsNullOrWhiteSpace(error))
+                error = "战斗失败节点结果提交失败。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+        return true;
+    }
+
     public bool TryBuildBattleVictoryPlan(out BattleVictoryPlan plan, out string error)
     {
         plan = null;
@@ -2245,6 +2464,16 @@ public partial class GameManager : Node
             GD.PrintErr($"[GameManager] {error}");
             return false;
         }
+
+#if DEBUG
+        if (_injectBattleVictoryCommitFailureForSelfCheck)
+        {
+            _injectBattleVictoryCommitFailureForSelfCheck = false;
+            error = "自检注入：胜利计划提交失败。";
+            GD.PrintErr($"[GameManager] {error}");
+            return false;
+        }
+#endif
 
         var snapshot = VictorySnapshot.Capture(this);
         try
@@ -2615,7 +2844,7 @@ public partial class GameManager : Node
         {
             var result = new List<CardRuntime>();
             foreach (var card in source)
-                result.Add(new CardRuntime { Info = RewardPlanValidator.CloneCardDefinition(card?.Info) });
+                if (card != null) result.Add(card.Clone());
             return result;
         }
 
@@ -2699,10 +2928,12 @@ public partial class GameManager : Node
                 LingYun += grant.LingYunAmount;
                 return true;
             case RewardGrantType.Card when grant.Card != null:
-                _runState.PermanentDeck.Add(new CardRuntime
+                if (!CardCatalogService.TryCreateRuntimeCard(grant.Card.DefinitionId ?? grant.Card.Id, out var rewardCard, out error))
                 {
-                    Info = RewardPlanValidator.CloneCardDefinition(grant.Card),
-                });
+                    GD.PrintErr($"[GameManager] 奖励卡写入被阻止：{error}");
+                    return false;
+                }
+                _runState.PermanentDeck.Add(rewardCard);
                 return true;
             default:
                 error = $"奖励内容无效：{grant.RewardId}/{grant.GrantType}";
@@ -2759,7 +2990,12 @@ public partial class GameManager : Node
             return;
         }
 
-        _runState.PermanentDeck.Add(new CardRuntime { Info = cardDef });
+        if (!CardCatalogService.TryCreateRuntimeCard(cardDef.DefinitionId ?? cardDef.Id, out var runtime, out var error))
+        {
+            GD.PrintErr($"[GameManager] 添加卡牌失败：{error}");
+            return;
+        }
+        _runState.PermanentDeck.Add(runtime);
     }
 
     public bool TryRemoveCardFromDeck(CardRuntime card, out string error)
@@ -2800,7 +3036,8 @@ public partial class GameManager : Node
     }
 
     /// <summary>
-    /// 查询一张卡的升级版定义。当前规则以 CardInfo.UpgradeToId 为唯一事实来源，不按牌名特判。
+    /// 查询一张卡的升级版定义。升级边由 CardDefinitionResource 的 Upgrade 字段提供，
+    /// 不按卡名特判，也不再读取 DataDefs 旧快照。
     /// </summary>
     public bool TryGetUpgradeForCard(CardInfo cardInfo, out CardInfo upgradedInfo)
     {
@@ -2808,7 +3045,7 @@ public partial class GameManager : Node
         if (cardInfo == null || string.IsNullOrEmpty(cardInfo.UpgradeToId))
             return false;
 
-        return DataDefs.TryGetCardById(cardInfo.UpgradeToId, out upgradedInfo);
+        return CardCatalogService.TryGetCardProjection(cardInfo.UpgradeToId, out upgradedInfo, out _);
     }
 
     /// <summary>
@@ -2822,7 +3059,12 @@ public partial class GameManager : Node
         if (!TryGetUpgradeForCard(card.Info, out var upgradedInfo))
             return false;
 
-        card.Info = upgradedInfo;
+        if (!CardCatalogService.TryCreateRuntimeCard(upgradedInfo.DefinitionId ?? upgradedInfo.Id, out var upgradedRuntime, out var error))
+        {
+            GD.PrintErr($"[GameManager] 升级卡牌失败：{error}");
+            return false;
+        }
+        card.ReplaceWith(upgradedRuntime);
         return true;
     }
 
@@ -2877,4 +3119,23 @@ public partial class GameManager : Node
 public class CardRuntime
 {
     public CardInfo Info;
+    public CardExecutionPlan ExecutionPlan { get; private set; }
+
+    public CardRuntime(CardInfo info, CardExecutionPlan executionPlan)
+    {
+        Info = info;
+        ExecutionPlan = executionPlan;
+    }
+
+    /// <summary>战斗/快照永远复制实例和兼容投影，不共享永久套牌对象。</summary>
+    public CardRuntime Clone()
+    {
+        return new CardRuntime(RewardPlanValidator.CloneCardDefinition(Info), ExecutionPlan);
+    }
+
+    internal void ReplaceWith(CardRuntime replacement)
+    {
+        Info = replacement?.Info;
+        ExecutionPlan = replacement?.ExecutionPlan;
+    }
 }

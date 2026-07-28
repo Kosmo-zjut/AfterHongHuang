@@ -25,7 +25,8 @@ public static class B2EncounterProductionSelfCheck
             Ensure(EncounterPool.Act1.TryGetDefinition(id, out var definition), $"遭遇定义缺失：{id}");
             Ensure(EnemyDefinitionValidator.TryValidate(definition, out var definitionError), definitionError);
         }
-        foreach (var card in DataDefs.BossRewardCardPool)
+        Ensure(CardPoolCatalog.TryGet("boss_rewards", out var bossRewardPool, out var bossPoolError), bossPoolError);
+        foreach (var card in bossRewardPool.Cards)
             Ensure(card.Id.StartsWith("wx_a1_boss_"), $"Boss 天品卡 ID 不符合专属池：{card.Id}");
 
         int encounterNodes = 0;

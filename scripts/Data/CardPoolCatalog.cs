@@ -13,14 +13,9 @@ public sealed class CardPoolDefinition
 /// </summary>
 public static class CardPoolCatalog
 {
-    private static readonly IReadOnlyList<CardPoolDefinition> Definitions = new[]
-    {
-        new CardPoolDefinition { Id = "reward_cards", Cards = DataDefs.RewardCardPool },
-        new CardPoolDefinition { Id = "boss_rewards", Cards = DataDefs.BossRewardCardPool },
-    };
-
+    /// <summary>生产读取统一委托给 Resource Catalog，禁止回退旧 DataDefs 数组。</summary>
     public static bool TryGet(string id, out CardPoolDefinition definition, out string error) =>
-        TryResolve(id, Definitions, out definition, out error);
+        CardCatalogService.TryGetPool(id, out definition, out error);
 
     /// <summary>目录与测试 fixture 共用的卡池绑定入口。</summary>
     public static bool TryResolve(string id, IEnumerable<CardPoolDefinition> definitions,

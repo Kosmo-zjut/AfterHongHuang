@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CardDefinitionResource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/Data/CardDefinitionResource.cs" id="1"]
+[resource]
+script = ExtResource("1")
+Id = "wx_01_p"
+DisplayName = "拳袭+"
+DescriptionFallback = "造成{0}点伤害"
+OwnerCharacterId = "wuzhu"
+Category = 0
+Costs = [{ "costType": 0, "amount": 1, "timing": 0, "failurePolicy": 0, "canCauseDefeat": false }]
+TargetPolicy = { "selectionMode": 2, "scope": 2, "minimumTargets": 1, "maximumTargets": 1, "allowDeadTargets": false, "retargetOnInvalid": 0 }
+Effects = [{ "order": 1, "effectType": 0, "targetSelector": 0, "amount": 9, "statusKind": 0, "durationScope": 0, "destinationZone": 0 }]
+RewardPoolIds = ["upgrade_only"]
+Upgrade = { "canUpgrade": false, "nextCardId": "", "familyId": "wx_01" }
+Tags = ["wuzhu", "upgrade", "attack"]
+Availability = { "minContentVersion": "1.0.0" }
+Preview = { "frameKey": "default_card" }
+Balance = { "role": "starter_attack_upgrade" }

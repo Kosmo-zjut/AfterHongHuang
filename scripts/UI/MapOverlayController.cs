@@ -19,6 +19,9 @@ public partial class MapOverlayController : Control
     private const float ViewHeight = 760f;
     private const float DragThreshold = 8f;
     private const float WheelStep = 160f;
+    // This Control owns input below TopBar without becoming a second opaque page. The visible
+    // map is only the scroll/panel region; the current node page remains visible underneath.
+    private static readonly Color ContentInputShieldColor = new(0f, 0f, 0f, 0f);
 
     private Panel _panel;
     private Control _inputBlocker;
@@ -27,6 +30,7 @@ public partial class MapOverlayController : Control
     private bool _interactive;
     private bool _animating;
     private bool _closing;
+    private bool _skipMapContentForSelfCheck;
     private bool _pointerDown;
     private bool _dragging;
     private bool _suppressNextNodeClick;
@@ -60,6 +64,27 @@ public partial class MapOverlayController : Control
         return overlay;
     }
 
+    /// <summary>
+    /// Creates the real visual/input hierarchy without resolving RunState data. It exists only
+    /// for the startup self-check, which runs before a playable run and MapGraph are available.
+    /// </summary>
+    internal static MapOverlayController OpenForSelfCheck(Control parent)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        if (!OverlayCoordinator.TryPrepareMap(out var coordinatorError))
+            throw new InvalidOperationException(coordinatorError);
+
+        var overlay = new MapOverlayController
+        {
+            _interactive = false,
+            _skipMapContentForSelfCheck = true,
+        };
+        parent.AddChild(overlay);
+        OverlayCoordinator.RegisterMap(overlay);
+        overlay.Build(immediate: true);
+        return overlay;
+    }
+
     /// <summary>关闭 overlay；关闭只释放地图层，不触碰底层节点页或 RunState。</summary>
     public void Close()
     {
@@ -83,16 +108,19 @@ public partial class MapOverlayController : Control
     private void Build(bool immediate)
     {
         SetAnchorsPreset(LayoutPreset.FullRect);
-        // 根节点覆盖全屏但不占用 TopBar 输入；透明输入层从 TopBar 下缘开始，
-        // 在卷轴展开和收起动画的全过程阻断底层节点页输入。
+        // 根节点覆盖全屏但不占用 TopBar 输入。透明输入层只阻断内容区交互，
+        // 不能把 Battle/Lingmai/Shop/奖励页面伪装成一张新的不透明底页。
         MouseFilter = MouseFilterEnum.Ignore;
-        ZIndex = OverlayCoordinator.MapAndUtilityZIndex;
+        // The map deliberately sits above CardReward but stays below the TopBar input region.
+        // CardReward is preserved as a sibling and becomes visible again when this cover closes.
+        ZIndex = OverlayCoordinator.MapCoverZIndex;
 
         _inputBlocker = new ColorRect
         {
+            Name = "ContentCover",
             Position = new Vector2(0, InputBlockerTop),
             Size = new Vector2(1920, InputBlockerHeight),
-            Color = Colors.Transparent,
+            Color = ContentInputShieldColor,
             MouseFilter = MouseFilterEnum.Stop,
         };
         AddChild(_inputBlocker);
@@ -152,7 +180,11 @@ public partial class MapOverlayController : Control
         _panel.AddChild(_viewport);
 
         var graph = GameManager.Instance?.MapGraph;
-        if (graph == null)
+        if (_skipMapContentForSelfCheck)
+        {
+            // The startup self-check validates coverage ownership before any run creates a graph.
+        }
+        else if (graph == null)
         {
             ShowError("RunState 缺少生产 MapGraph，无法展示地图。");
         }

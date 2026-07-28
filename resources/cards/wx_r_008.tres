@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CardDefinitionResource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/Data/CardDefinitionResource.cs" id="1"]
+[resource]
+script = ExtResource("1")
+Id = "wx_r_008"
+DisplayName = "祭血凝劲"
+DescriptionFallback = "失去4点生命，获得{0}点斗劲，消弭"
+OwnerCharacterId = "wuzhu"
+Category = 1
+Costs = [{ "costType": 0, "amount": 1, "timing": 0, "failurePolicy": 0, "canCauseDefeat": false }]
+TargetPolicy = { "selectionMode": 0, "scope": 1, "minimumTargets": 0, "maximumTargets": 0, "allowDeadTargets": false, "retargetOnInvalid": 0 }
+Effects = [{ "order": 1, "effectType": 2, "targetSelector": 1, "amount": 4, "statusKind": 0, "durationScope": 0, "destinationZone": 0 }, { "order": 2, "effectType": 3, "targetSelector": 1, "amount": 2, "statusKind": 1, "durationScope": 0, "destinationZone": 0 }, { "order": 3, "effectType": 4, "targetSelector": 1, "amount": 0, "statusKind": 0, "durationScope": 0, "destinationZone": 1 }]
+RewardPoolIds = ["reward_cards"]
+Upgrade = { "canUpgrade": false, "nextCardId": "", "familyId": "wx_r_008" }
+Tags = ["wuzhu", "reward", "self_harm", "strength", "exhaust"]
+Availability = { "minContentVersion": "1.1.0" }
+Preview = { "frameKey": "default_card" }
+Balance = { "role": "reward_high_growth", "balanceVersion": "B1-20260720" }

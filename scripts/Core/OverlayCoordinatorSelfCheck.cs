@@ -5,14 +5,26 @@ public static class OverlayCoordinatorSelfCheck
 {
     public static void Run()
     {
-        Ensure(OverlayCoordinator.GlobalOperationZIndex > OverlayCoordinator.CardRewardZIndex,
-            "全局地图入口未高于 CardReward 内容层，可能被奖励遮罩阻断。");
-        Ensure(OverlayCoordinator.GlobalOperationZIndex < OverlayCoordinator.TransitionAndErrorZIndex,
-            "全局地图入口不得覆盖 Transition/Error 输入层。");
+        Ensure(OverlayCoordinator.MapCoverZIndex > OverlayCoordinator.CardRewardZIndexMax,
+            "地图覆盖层必须高于 CardReward，关闭后才能恢复同一奖励状态。");
+        Ensure(OverlayCoordinator.CardRewardZIndex > OverlayCoordinator.VictoryZIndex,
+            "CardReward 必须压住胜利页面内容，阻断本地继续输入。");
+
+        var nodePage = new Control();
+        int mapToggleCount = 0;
+        var localContinue = NodeMapEntry.Add(nodePage, () => mapToggleCount++);
+        Ensure(localContinue.ZAsRelative && localContinue.ZIndex == 0,
+            "节点页继续入口不得脱离父页面层级或占用全局 Z 平面。");
+        Ensure(localContinue.Text == "继续", "共享节点入口文本必须为继续，地图仅保留在 TopBar。 ");
+        localContinue.EmitSignal(BaseButton.SignalName.Pressed);
+        Ensure(mapToggleCount == 1, "本地继续只允许调用地图开关，不能包含结算或路由副作用。");
+        localContinue.Free();
+        nodePage.Free();
 
         var victory = new Panel();
         Ensure(OverlayCoordinator.TryRegisterVictory(victory, out var victoryError), victoryError);
-        VerifyGlobalEntryCancelsReward("地图", (out string error) => OverlayCoordinator.TryPrepareMap(out error));
+        VerifyMapCoverPreservesReward();
+        VerifyMapCoverVisuallyOwnsNodeContent();
         VerifyGlobalEntryCancelsReward("套牌", (out string error) => OverlayCoordinator.TryPrepareUtilityOverlay("套牌页面", out error));
         VerifyGlobalEntryCancelsReward("设置", (out string error) => OverlayCoordinator.TryPrepareUtilityOverlay("设置", out error));
 
@@ -53,6 +65,97 @@ public static class OverlayCoordinatorSelfCheck
     }
 
     private delegate bool PrepareOverlayAction(out string error);
+
+    /// <summary>
+    /// Map opening is intentionally different from Deck/Settings: it covers a CardReward child
+    /// instead of cancelling it, so closing the map returns to the same RewardPlan progress.
+    /// </summary>
+    private static void VerifyMapCoverPreservesReward()
+    {
+        var reward = new Panel();
+        const string candidateFingerprint = "fixture-candidate-a|fixture-candidate-b|fixture-candidate-c";
+        const int selectedCount = 1;
+        bool cancellationCalled = false;
+        CardRewardHelper.RegisterCancellationForOverlay(reward, () => cancellationCalled = true);
+        Ensure(OverlayCoordinator.TryRegisterCardReward(reward, out var rewardError), rewardError);
+
+        Ensure(OverlayCoordinator.TryPrepareMap(out var prepareError), $"地图入口被拒绝：{prepareError}");
+        Ensure(!cancellationCalled, "地图打开不应取消 CardReward 或消费奖励。 ");
+        Ensure(selectedCount == 1 && candidateFingerprint == "fixture-candidate-a|fixture-candidate-b|fixture-candidate-c",
+            "地图打开意外改变奖励候选或已选进度。");
+
+        OverlayCoordinator.Unregister(reward);
+        reward.Free();
+    }
+
+    /// <summary>
+    /// Creates the real map control instead of only checking coordinator callbacks. The transparent
+    /// input shield must protect content below TopBar without hiding the preserved node page.
+    /// </summary>
+    private static void VerifyMapCoverVisuallyOwnsNodeContent()
+    {
+        var host = new Control
+        {
+            Name = "OverlayCoordinatorSelfCheckHost",
+            Size = new Vector2(1920, 1080),
+        };
+
+        var topBar = new ColorRect
+        {
+            Name = "TopBarProbe",
+            Position = Vector2.Zero,
+            Size = new Vector2(1920, 44),
+            Color = Colors.White,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+        };
+        host.AddChild(topBar);
+
+        var reward = new ColorRect
+        {
+            Name = "CardRewardProbe",
+            Position = new Vector2(0, 44),
+            Size = new Vector2(1920, 1036),
+            ZIndex = OverlayCoordinator.CardRewardZIndex,
+            Color = Colors.White,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+        };
+        host.AddChild(reward);
+        const string candidateFingerprint = "fixture-candidate-a|fixture-candidate-b|fixture-candidate-c";
+        const int selectedCount = 1;
+        bool cancellationCalled = false;
+        CardRewardHelper.RegisterCancellationForOverlay(reward, () => cancellationCalled = true);
+        Ensure(OverlayCoordinator.TryRegisterCardReward(reward, out var rewardError), rewardError);
+
+        var localContinue = NodeMapEntry.Add(host, () => { });
+        // Detached startup probes do not run Godot's anchor layout pass. Apply the shared scene's
+        // frozen bottom-right rect so the real entry control participates in the coverage check.
+        localContinue.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+        localContinue.Position = new Vector2(1656, 944);
+        localContinue.Size = new Vector2(200, 64);
+        // This uses the production MapOverlay hierarchy but intentionally skips MapGraph data:
+        // startup self-checks execute in GameManager._EnterTree before a run exists.
+        var map = MapOverlayController.OpenForSelfCheck(host);
+        Ensure(map != null, "无法创建真实地图覆盖层。");
+        var cover = map.GetNodeOrNull<ColorRect>("ContentCover");
+        Ensure(cover != null, "地图 overlay 缺少内容区视觉承载层。");
+        Ensure(cover.MouseFilter == Control.MouseFilterEnum.Stop, "地图内容区必须阻断下层输入。");
+        Ensure(cover.Color.A <= 0.01f, "地图输入屏障不得成为不透明全屏底页。");
+
+        Rect2 coverRect = cover.GetGlobalRect();
+        Ensure(!coverRect.Intersects(topBar.GetGlobalRect()), "地图视觉承载层不得覆盖 TopBar。");
+        Ensure(coverRect.Encloses(reward.GetGlobalRect()), "地图输入屏障未完整保护 CardReward 内容区。");
+        Ensure(coverRect.Encloses(localContinue.GetGlobalRect()),
+            $"地图输入屏障未完整保护本地继续入口：cover={coverRect} continue={localContinue.GetGlobalRect()}。");
+
+        map.CloseImmediately();
+        Ensure(!cancellationCalled, "地图关闭不得取消 CardReward 或消费奖励。");
+        Ensure(GodotObject.IsInstanceValid(reward), "地图关闭后必须保留同一个 CardReward 实例。");
+        Ensure(selectedCount == 1 && candidateFingerprint == "fixture-candidate-a|fixture-candidate-b|fixture-candidate-c",
+            "地图关闭后奖励候选或选择进度发生变化。");
+
+        OverlayCoordinator.Unregister(reward);
+        host.Free();
+    }
 
     private static void Ensure(bool condition, string error)
     {

@@ -64,12 +64,18 @@ public static class DataDefs
         },
     };
 
-    // 角色数组声明在牌组数组之前，使用静态构造器完成引用绑定，避免静态字段初始化顺序导致空牌组。
+    // 角色数组不再绑定 CardInfo[]。初始牌重复量是角色套牌配置，单卡事实由 CardCatalogResource 持有。
     static DataDefs()
     {
         if (!TryGetCharacterDefinition("wuzhu", out var wuzhu))
             throw new System.InvalidOperationException("角色数据缺少巫祝定义，无法绑定初始牌组。");
-        wuzhu.StarterDeck = WuZhuStarterDeck;
+        wuzhu.StarterDeckEntries = new[]
+        {
+            new StarterDeckEntry { CardId = "wx_01", Count = 4 },
+            new StarterDeckEntry { CardId = "wx_02", Count = 4 },
+            new StarterDeckEntry { CardId = "wx_03", Count = 1 },
+            new StarterDeckEntry { CardId = "wx_04", Count = 1 },
+        };
     }
 
     // ==================== 巫祝初始卡组（10张） ====================
@@ -262,8 +268,10 @@ public static class DataDefs
     }
 
     /// <summary>
-    /// 按卡牌 ID 查找静态卡牌定义。灵脉精进道行用它把当前牌永久替换为升级版。
+    /// 迁移期旧卡牌快照查询，仅供 CardCatalog 双读自检/fixture 使用。
+    /// 生产奖励、套牌、升级和战斗不得调用本方法。
     /// </summary>
+    [System.Obsolete("仅迁移 fixture 使用；生产请通过 CardCatalogService 读取 CardDefinitionResource。")]
     public static bool TryGetCardById(string id, out CardInfo cardInfo)
     {
         foreach (var card in WuZhuStarterDeck)
@@ -430,18 +438,31 @@ public class CharacterInfo
     public int MaxLingli;
     public string DeckPreview;
     public string Difficulty; // 角色难度标签（凡人/地仙/天仙）
-    /// <summary>该角色新局使用的永久初始牌组定义。</summary>
+    /// <summary>迁移 fixture 的旧初始牌组；生产角色使用 StarterDeckEntries。</summary>
     public CardInfo[] StarterDeck;
+    /// <summary>生产初始牌组配置。重复数量只在这里声明，不复制单卡定义。</summary>
+    public StarterDeckEntry[] StarterDeckEntries;
+}
+
+/// <summary>角色套牌配置的一项，CardId 必须由 CardCatalog 解析。</summary>
+public sealed class StarterDeckEntry
+{
+    public string CardId;
+    public int Count;
 }
 
 public class CardInfo
 {
+    /// <summary>来源 Resource 的稳定 ID。兼容投影不允许脱离 Catalog 作为生产定义使用。</summary>
+    public string DefinitionId;
     public string Id;
     public string Name;
     public CardType Type;
     public int Cost;
     public int Value;
     public string Description;
+    /// <summary>由 CardExecutionPlan 生成的有序效果摘要；卡面优先使用它而非旧聚合数值。</summary>
+    public string ExecutionSummary;
     public int SelfDamage;
     public bool HasSecondary;
     public int SecondaryValue;

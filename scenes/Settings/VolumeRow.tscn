@@ -1,0 +1,55 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/VolumeRowController.cs" id="1_controller"]
+
+[node name="VolumeRow" type="HBoxContainer"]
+custom_minimum_size = Vector2(0, 56)
+layout_mode = 3
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 56.0
+grow_horizontal = 2
+theme_override_constants/separation = 16
+script = ExtResource("1_controller")
+
+[node name="Label" type="Label" parent="."]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+size_flags_vertical = 4
+text = ""
+vertical_alignment = 1
+
+[node name="Slider" type="HSlider" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+step = 1.0
+value = 0.0
+tooltip_text = "调整音量百分比"
+
+[node name="ValueLabel" type="Label" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+size_flags_vertical = 4
+text = "—"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="MuteLabel" type="Label" parent="."]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+size_flags_vertical = 4
+text = "静音"
+vertical_alignment = 1
+
+[node name="MuteCheckBox" type="CheckBox" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+size_flags_vertical = 4
+text = ""
+tooltip_text = "静音/取消静音"

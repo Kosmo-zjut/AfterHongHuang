@@ -206,7 +206,7 @@ public partial class CharacterSelectController : Control
             return;
         }
 
-        if (!DataDefs.TryResolveStarterDeck(charInfo, out _, out var deckError))
+        if (!CharacterDeckFactory.TryValidate(charInfo, out var deckError))
         {
             GD.PrintErr($"[角色选择] 当前角色缺少初始牌组，拒绝开始：{deckError}");
             return;

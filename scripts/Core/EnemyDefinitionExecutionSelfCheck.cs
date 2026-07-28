@@ -68,18 +68,15 @@ public static class EnemyDefinitionExecutionSelfCheck
         manager.ExecuteEnemyTurn();
         Ensure(manager.EnemyHuti == guardIntent.GuardValue, "护体意图未通过正式敌方行动入口生效");
 
-        var breaker = new CardRuntime
-        {
-            Info = new CardInfo
-            {
-                Id = "fixture_guard_breaker",
-                Name = "测试破盾牌",
-                Type = CardType.斗击,
-                TargetMode = CardTargetMode.Enemy,
-                Cost = 0,
-                Value = guardIntent.GuardValue + 1,
-            }
-        };
+        var breaker = new CardRuntime(
+            new CardInfo { Id = "fixture_guard_breaker", Name = "测试破盾牌", Type = CardType.斗击,
+                TargetMode = CardTargetMode.Enemy, Cost = 0, Value = guardIntent.GuardValue + 1 },
+            new CardExecutionPlan("fixture_guard_breaker", 0,
+                new CardTargetPolicyDefinition { SelectionMode = CardSelectionMode.Required, Scope = CardTargetScope.SingleEnemy,
+                    MinimumTargets = 1, MaximumTargets = 1, RetargetOnInvalid = CardRetargetPolicy.RejectPlay },
+                new[] { new CardEffectDefinition { Order = 1, EffectType = CardEffectKind.DealDamage,
+                    TargetSelector = CardEffectTarget.SelectedTarget, Amount = guardIntent.GuardValue + 1,
+                    StatusKind = CardStatusKind.None, DurationScope = CardDurationScope.Battle, DestinationZone = CardDestinationZone.None } }));
         manager.ActiveBattle.Hand.Add(breaker);
         manager.PlayerLingli = manager.PlayerMaxLingli;
         Ensure(manager.PlayCard(breaker), "正式受伤入口未能执行破盾卡牌");

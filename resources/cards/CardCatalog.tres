@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="CardCatalogResource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/Data/CardCatalogResource.cs" id="1"]
+
+[resource]
+script = ExtResource("1")
+SchemaVersion = 1
+CardResourcePaths = ["res://resources/cards/wx_01.tres", "res://resources/cards/wx_01_p.tres", "res://resources/cards/wx_02.tres", "res://resources/cards/wx_02_p.tres", "res://resources/cards/wx_03.tres", "res://resources/cards/wx_03_p.tres", "res://resources/cards/wx_04.tres", "res://resources/cards/wx_04_p.tres", "res://resources/cards/wx_r_001.tres", "res://resources/cards/wx_r_002.tres", "res://resources/cards/wx_r_003.tres", "res://resources/cards/wx_r_004.tres", "res://resources/cards/wx_r_005.tres", "res://resources/cards/wx_r_006.tres", "res://resources/cards/wx_r_007.tres", "res://resources/cards/wx_r_008.tres", "res://resources/cards/wx_r_009.tres", "res://resources/cards/wx_r_010.tres", "res://resources/cards/wx_a1_boss_001.tres", "res://resources/cards/wx_a1_boss_002.tres", "res://resources/cards/wx_a1_boss_003.tres"]
+Pools = [{ "id": "starter_wuzhu", "cardIds": ["wx_01", "wx_02", "wx_03", "wx_04"] }, { "id": "upgrade_only", "cardIds": ["wx_01_p", "wx_02_p", "wx_03_p", "wx_04_p"] }, { "id": "reward_cards", "cardIds": ["wx_r_001", "wx_r_002", "wx_r_003", "wx_r_004", "wx_r_005", "wx_r_006", "wx_r_007", "wx_r_008", "wx_r_009", "wx_r_010"] }, { "id": "boss_rewards", "cardIds": ["wx_a1_boss_001", "wx_a1_boss_002", "wx_a1_boss_003"] }]

@@ -28,8 +28,8 @@ public static class CardRewardHelper
     }
 
     /// <summary>
-    /// Cancels a visible reward overlay through the same path as its skip button. Global TopBar
-    /// entry points use this instead of freeing the control, so the source reward row is re-enabled.
+    /// Cancels a visible reward overlay through the same path as its skip button. Utility overlays
+    /// (Deck/Settings) use this instead of freeing the control, so the source reward row is re-enabled.
     /// </summary>
     public static bool TryCancelForGlobalOverlay(Node overlayNode, out string error)
     {
@@ -49,7 +49,7 @@ public static class CardRewardHelper
         return true;
     }
 
-    /// <summary>Registers the one cancellation path shared by the skip button and global TopBar entry.</summary>
+    /// <summary>Registers the one cancellation path shared by the skip button and utility overlays.</summary>
     internal static void RegisterCancellationForOverlay(Control overlay, System.Action cancelAction)
     {
         if (overlay == null || cancelAction == null)
@@ -109,8 +109,8 @@ public static class CardRewardHelper
         overlay.Name = "CardRewardOverlay";
         overlay.SetPosition(new Vector2(0, 44));
         overlay.Size = new Vector2(1920, 1036);
-        // CardReward blocks only content-area input. The coordinator's global operation layer
-        // remains above it so the shared NodeMapEntry can cancel this overlay recoverably.
+        // CardReward blocks the local continue entry and all content-area input. TopBar remains
+        // outside this rectangle and can still use the coordinator's recoverable cancel chain.
         overlay.ZIndex = OverlayCoordinator.CardRewardZIndex;
         // Godot 枚举使用语义值而非本地约定数字；overlay 必须停止输入向下穿透。
         overlay.MouseFilter = Control.MouseFilterEnum.Stop;

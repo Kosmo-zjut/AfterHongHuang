@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="CardDefinitionResource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/Data/CardDefinitionResource.cs" id="1"]
+[resource]
+script = ExtResource("1")
+Id = "wx_a1_boss_002"
+DisplayName = "九首回潮"
+DescriptionFallback = "获得{0}点护体，并获得1点斗劲"
+OwnerCharacterId = "wuzhu"
+Category = 1
+Rarity = 3
+Costs = [{ "costType": 0, "amount": 2, "timing": 0, "failurePolicy": 0, "canCauseDefeat": false }]
+TargetPolicy = { "selectionMode": 0, "scope": 1, "minimumTargets": 0, "maximumTargets": 0, "allowDeadTargets": false, "retargetOnInvalid": 0 }
+Effects = [{ "order": 1, "effectType": 1, "targetSelector": 1, "amount": 16, "statusKind": 0, "durationScope": 0, "destinationZone": 0 }, { "order": 2, "effectType": 3, "targetSelector": 1, "amount": 1, "statusKind": 1, "durationScope": 0, "destinationZone": 0 }]
+RewardPoolIds = ["boss_rewards"]
+Upgrade = { "canUpgrade": false, "nextCardId": "", "familyId": "wx_a1_boss_002" }
+Tags = ["wuzhu", "boss", "block", "strength"]
+Availability = { "minContentVersion": "1.1.0" }
+Preview = { "frameKey": "boss_card" }
+Balance = { "role": "boss_guard_growth", "balanceVersion": "B1-20260720" }

@@ -3,6 +3,8 @@ using Godot;
 /// <summary>事件页面。只渲染 EventDefinition 选项，并把效果交给通用执行器。</summary>
 public partial class EventController : Control
 {
+    [Export] public PackedScene SettingsDialogScene { get; set; }
+
     private Label _titleLabel;
     private Label _descriptionLabel;
     private Label _resultLabel;
@@ -23,7 +25,7 @@ public partial class EventController : Control
         _topBar = GetNode<TopBar>("TopBar");
         _topBar.OnDeckPressed = () => DeckViewer.Show(this);
         _topBar.OnMapPressed = ToggleMapOverlay;
-        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this);
+        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this, SettingsDialogScene);
 
         var gm = GameManager.Instance;
         _eventNode = gm.ActiveNode == null ? null : gm.MapGraph?.GetNode(gm.ActiveNode.NodeId);

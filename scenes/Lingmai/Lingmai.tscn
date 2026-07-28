@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/UI/LingmaiController.cs" id="1_lingmai"]
 [ext_resource type="Script" path="res://scripts/UI/TopBar.cs" id="2_topbar"]
+[ext_resource type="PackedScene" path="res://scenes/Settings/SettingsDialog.tscn" id="3_settings"]
 
 [node name="Lingmai" type="Control"]
 layout_mode = 3
@@ -11,6 +12,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_lingmai")
+SettingsDialogScene = ExtResource("3_settings")
 
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1

@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 /// <summary>
 /// Debug 构建角色选择绑定自检。
@@ -46,7 +47,30 @@ public static class CharacterSelectionBindingSelfCheck
         Ensure(!DataDefs.TryGetCharacterDefinition("fixture_selection_missing", out _),
             "缺失角色定义被错误解析");
 
+        Ensure(DataDefs.TryGetCharacterDefinition("wuzhu", out var productionCharacter),
+            "生产角色定义缺少默认可玩角色。");
+        Ensure(CharacterDeckFactory.TryValidate(productionCharacter, out var productionDeckError), productionDeckError);
+        Ensure(HasExpectedStarterDeck(productionCharacter.StarterDeckEntries),
+            "生产角色初始牌组不满足 4/4/1/1 的 Catalog 配置。");
+
         GD.Print("[CharacterSelectionBindingSelfCheck] PASS definition-driven selection");
+    }
+
+    private static bool HasExpectedStarterDeck(IEnumerable<StarterDeckEntry> entries)
+    {
+        var counts = new Dictionary<string, int>();
+        foreach (var entry in entries ?? System.Array.Empty<StarterDeckEntry>())
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.CardId))
+                return false;
+            counts[entry.CardId] = entry.Count;
+        }
+
+        return counts.Count == 4 &&
+            counts.TryGetValue("wx_01", out var attackCount) && attackCount == 4 &&
+            counts.TryGetValue("wx_02", out var blockCount) && blockCount == 4 &&
+            counts.TryGetValue("wx_03", out var strongAttackCount) && strongAttackCount == 1 &&
+            counts.TryGetValue("wx_04", out var bloodCardCount) && bloodCardCount == 1;
     }
 
     private static void Ensure(bool condition, string error)

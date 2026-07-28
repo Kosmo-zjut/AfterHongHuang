@@ -7,6 +7,8 @@ using System.Collections.Generic;
 /// </summary>
 public partial class BattleController : Control
 {
+    [Export] public PackedScene SettingsDialogScene { get; set; }
+
     // TopBar is the permanent global entry. Content modals begin below this fixed bar.
     private const float TopBarHeight = 44f;
 
@@ -51,6 +53,7 @@ public partial class BattleController : Control
 
     // ---- 选中卡牌状态 ----
     private CardButton _selectedCardBtn;
+    private ResolvedCardExecution _selectedCardExecution;
     private bool _arrowVisible;
     private Vector2 _arrowTarget;
     private TargetArrowOverlay _targetArrowOverlay;
@@ -70,6 +73,7 @@ public partial class BattleController : Control
     private string _lingYunRewardId = "";
     private bool _rewardSettlementBlocked;
     private string _rewardSettlementError = "";
+    private NodePageNavigationCoordinator _nodeNavigation;
 
     // ---- 玩家区域参数（供箭头使用）----
     private Vector2 PlayerPortraitCenter => new(220f, 370f);
@@ -90,6 +94,9 @@ public partial class BattleController : Control
         }
 
         BuildBackground();
+        _nodeNavigation = new NodePageNavigationCoordinator(this, gm,
+            error => AppendLog($"[color=red]地图导航失败：{error}[/color]"),
+            ClearBattleSceneOverlays);
         BuildTopBar();
         BuildPlayerArea();
         BuildEnemyArea();
@@ -226,46 +233,16 @@ public partial class BattleController : Control
     {
     }
 
-    /// <summary>战斗中/胜利页呼出共享地图 overlay；普通战斗只读，胜利页允许推进。</summary>
+    /// <summary>战斗页面只请求共享导航协调器；可达性和离场由核心端口决定。</summary>
     private void ShowMapOverlay()
     {
-        OpenBattleMapOverlay();
-    }
-
-    private void OpenBattleMapOverlay()
-    {
-        if (_mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay))
+        if (_nodeNavigation == null)
         {
-            _mapOverlay.Close();
+            AppendLog("[color=red]地图导航服务未初始化。[/color]");
             return;
         }
-
-        var gm = GameManager.Instance;
-        bool interactive = gm.BattleOver && gm.PlayerWon &&
-            gm.CurrentState == PlayerState.战斗胜利结算 && gm.ActiveNodeResultSubmitted;
-        _mapOverlay = MapOverlayController.Open(this, interactive,
-            interactive ? EnterNextNodeFromVictory : null,
-            () => _mapOverlay = null);
-        if (_mapOverlay == null)
-            AppendLog("[color=red]地图 overlay 创建失败。[/color]");
-    }
-
-    private MapOverlayController _mapOverlay;
-
-    /// <summary>
-    /// 只有用户在胜利地图 overlay 中点击合法节点时才离开 Battle；关闭 overlay 不会进入此方法。
-    /// </summary>
-    private void EnterNextNodeFromVictory(MapNodeDefinition info)
-    {
-        var gm = GameManager.Instance;
-        if (!gm.TryTransitionAndRouteFromCompletedNode(info, out var transitionError))
-        {
-            GD.PrintErr($"[战斗地图] 目标节点事务迁移失败：{transitionError}");
-            AppendLog($"[color=red]进入下一节点失败：{transitionError}[/color]");
-            return;
-        }
-
-        ClearBattleSceneOverlays();
+        if (!_nodeNavigation.TryToggleMap(out var error))
+            AppendLog($"[color=red]地图 overlay 创建失败：{error}[/color]");
     }
 
     /// <summary>绘制从 start 到 end 的弧形箭头</summary>
@@ -406,7 +383,7 @@ public partial class BattleController : Control
         _topBar.Size = new Vector2(1920, 44);
         _topBar.OnDeckPressed = () => DeckViewer.Show(this);
         _topBar.OnMapPressed = () => ShowMapOverlay();
-        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this);
+        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this, SettingsDialogScene);
         AddChild(_topBar);
     }
 
@@ -784,6 +761,13 @@ public partial class BattleController : Control
         // 选中新卡
         _selectedCardBtn = cardBtn;
         cardBtn.SetSelected(true);
+        if (!gm.TryPrepareCardExecution(cardBtn.Card, out _selectedCardExecution, out var prepareError))
+        {
+            AppendLog($"[取消] {prepareError}");
+            _selectedCardBtn = null;
+            cardBtn.ReturnToRest();
+            return;
+        }
         UpdateTargetHint(cardBtn.Card.Info);
 
         if (cardBtn.Card.Info.TargetMode == CardTargetMode.Self)
@@ -809,6 +793,13 @@ public partial class BattleController : Control
 
         _selectedCardBtn = cardBtn;
         cardBtn.SetSelected(true);
+        if (!gm.TryPrepareCardExecution(cardBtn.Card, out _selectedCardExecution, out var prepareError))
+        {
+            AppendLog($"[取消] {prepareError}");
+            _selectedCardBtn = null;
+            cardBtn.ReturnToRest();
+            return;
+        }
         UpdateTargetHint(cardBtn.Card.Info);
     }
 
@@ -851,11 +842,18 @@ public partial class BattleController : Control
         var card = _selectedCardBtn.Card;
         var gm = GameManager.Instance;
 
-        if (gm.PlayCard(card))
+        if (_selectedCardExecution == null)
         {
-            AppendLog($"打出 [{card.Info.Name}]");
+            AppendLog("[取消] 卡牌确认状态已失效，请重新选择");
+            DeselectCard();
+            return;
+        }
+        if (gm.PlayCard(card, _selectedCardExecution))
+        {
+            AppendLog($"打出 [{card.Info.Name}]：{gm.LastResolvedCardExecution?.Summary ?? card.Info.ExecutionSummary}");
             _selectedCardBtn.Visible = false;
             _selectedCardBtn = null;
+            _selectedCardExecution = null;
             HideTargetArrow();
             ClearTargetHint();
             UpdateAllUI();
@@ -917,6 +915,7 @@ public partial class BattleController : Control
             _selectedCardBtn.SetSelected(false);
             _selectedCardBtn = null;
         }
+        _selectedCardExecution = null;
         HideTargetArrow();
         ClearTargetHint();
         QueueRedraw();
@@ -1036,51 +1035,52 @@ public partial class BattleController : Control
     {
         var gm = GameManager.Instance;
         if (gm.BattleOver) return true;
-
-        if (gm.PlayerHp <= 0)
+        var settlement = new BattleVictorySettlementCommand(gm).ResolveTerminalBattleState();
+        switch (settlement.Status)
         {
-            gm.BattleOver = true;
-            gm.PlayerWon = false;
-            AppendLog("[color=red]你被击败了！道心破碎……[/color]");
-            ShowResult(false);
-            return true;
-        }
-
-        if (gm.EnemyHp <= 0)
-        {
-            if (!gm.TryRegisterEnemyDefeated(out var victoryError))
-            {
-                _rewardSettlementBlocked = true;
-                _rewardSettlementError = victoryError;
-                AppendLog($"[color=red]战斗终止失败：{victoryError}[/color]");
+            case BattleVictorySettlementStatus.NoOutcome:
+                return false;
+            case BattleVictorySettlementStatus.DefeatRegistered:
+                AppendLog("[color=red]你被击败了！道心破碎……[/color]");
+                ShowResult(false);
                 return true;
-            }
-
-            if (_rewardSettlementBlocked)
-                return true;
-
-            if (!gm.TryBuildBattleVictoryPlan(out var victoryPlan, out var planError) ||
-                !gm.TryCommitBattleVictory(victoryPlan, out planError))
-            {
-                _rewardSettlementBlocked = true;
-                _rewardSettlementError = planError;
-                GD.PrintErr($"[战斗] 胜利计划提交被阻止：{planError}");
-                AppendLog($"[color=red]奖励定义无效，胜利结算已阻止：{planError}[/color]");
+            case BattleVictorySettlementStatus.VictoryCommitted:
+            case BattleVictorySettlementStatus.VictoryAlreadyCommitted:
+                BindVictoryPlan(settlement.VictoryPlan);
+                AppendLog($"[color=green]击败了 {gm.ActiveEncounter.EnemyInfo.Name}！[/color]");
                 ShowResult(true);
                 return true;
-            }
-
-            _rewardContext = victoryPlan.RewardContext;
-            _rewardPlans.Clear();
-            _rewardPlans.AddRange(victoryPlan.CardRewards);
-            _lingYunRewardId = victoryPlan.LingYunRewardId;
-
-            AppendLog($"[color=green]击败了 {gm.ActiveEncounter.EnemyInfo.Name}！[/color]");
-
-            ShowResult(true);
-            return true;
+            case BattleVictorySettlementStatus.VictorySettlementFailed:
+                _rewardSettlementBlocked = true;
+                _rewardSettlementError = settlement.Error;
+                GD.PrintErr($"[战斗] 胜利计划提交被阻止：{settlement.Error}");
+                AppendLog($"[color=red]奖励定义无效，胜利结算已阻止：{settlement.Error}[/color]");
+                ShowResult(true);
+                return true;
+            default:
+                _rewardSettlementBlocked = true;
+                _rewardSettlementError = settlement.Error;
+                GD.PrintErr($"[战斗] 战斗结算命令被拒绝：{settlement.Error}");
+                AppendLog($"[color=red]战斗终止失败：{settlement.Error}[/color]");
+                return true;
         }
-        return false;
+    }
+
+    /// <summary>Copies an already-committed plan into presentation state; this method never builds or submits rewards.</summary>
+    private void BindVictoryPlan(BattleVictoryPlan victoryPlan)
+    {
+        if (victoryPlan == null)
+        {
+            _rewardSettlementBlocked = true;
+            _rewardSettlementError = "胜利结算命令未返回已提交奖励计划。";
+            GD.PrintErr($"[战斗] {_rewardSettlementError}");
+            return;
+        }
+
+        _rewardContext = victoryPlan.RewardContext;
+        _rewardPlans.Clear();
+        _rewardPlans.AddRange(victoryPlan.CardRewards);
+        _lingYunRewardId = victoryPlan.LingYunRewardId;
     }
 
     // ==================== 战斗结算弹窗 ====================
@@ -1093,14 +1093,6 @@ public partial class BattleController : Control
 
         if (!won)
         {
-            var defeatResult = gm.CreateNodeResult(NodeResultType.Defeated, "战斗失败", out var createError);
-            string submitError = "";
-            bool submitted = defeatResult != null && gm.SubmitNodeResult(defeatResult, out submitError);
-            if (!submitted)
-            {
-                GD.PrintErr($"[战斗] 失败结果记录未完成：{createError}{submitError}");
-            }
-
             GetTree().CreateTimer(1.5f).Timeout += () =>
             {
                 if (!gm.ExitBattleToTitleAfterDefeat(out var exitError))
@@ -1191,18 +1183,15 @@ public partial class BattleController : Control
         title.Size = new Vector2(960, 50);
         _victoryPopup.AddChild(title);
 
-        var rewardList = new VBoxContainer();
-        rewardList.SetPosition(new Vector2(120, 130));
-        rewardList.Size = new Vector2(560, 520);
-        rewardList.AddThemeConstantOverride("separation", 20);
-        _victoryPopup.AddChild(rewardList);
+        var rewardList = VictoryRewardList.AddTo(_victoryPopup);
 
         // 奖励1：灵韵（点击领取，领完消失）
         int lingYunAmount = gm.UnclaimedLingYun;
         var lingYunBtn = new Button();
         lingYunBtn.Text = $"灵韵 +{lingYunAmount}（点击领取）";
         lingYunBtn.AddThemeFontSizeOverride("font_size", 18);
-        lingYunBtn.CustomMinimumSize = new Vector2(600, 56);
+        lingYunBtn.CustomMinimumSize = new Vector2(0, 56);
+        lingYunBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         lingYunBtn.Pressed += () =>
         {
             if (!gm.ClaimUnclaimedLingYun(_lingYunRewardId, out var claimError))
@@ -1225,7 +1214,8 @@ public partial class BattleController : Control
         var cardBtn = new Button();
         cardBtn.Text = $"{plan.DisplayName}（{plan.Candidates.Count}选{plan.ChoiceCount}）";
         cardBtn.AddThemeFontSizeOverride("font_size", 18);
-        cardBtn.CustomMinimumSize = new Vector2(560, 56);
+        cardBtn.CustomMinimumSize = new Vector2(0, 56);
+        cardBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         cardBtn.Pressed += () =>
         {
             cardBtn.Disabled = true;
@@ -1251,10 +1241,7 @@ public partial class BattleController : Control
     /// </summary>
     private void ClearBattleSceneOverlays()
     {
-        if (_mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay))
-            _mapOverlay.CloseImmediately();
-
-        _mapOverlay = null;
+        _nodeNavigation?.Dispose();
 
         CardRewardHelper.CloseAllForParent(this);
         if (_victoryModalLayer != null && GodotObject.IsInstanceValid(_victoryModalLayer))
@@ -1309,11 +1296,9 @@ public partial class BattleController : Control
             MouseFilter = MouseFilterEnum.Stop,
         };
         _victoryModalLayer.AddChild(_victoryPopup);
-        NodeMapEntry.Add(_victoryModalLayer, ShowMapOverlay, IsMapOverlayOpen);
+        NodeMapEntry.Add(_victoryModalLayer, ShowMapOverlay);
         return true;
     }
-
-    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
 
     private bool IsVictoryModalActive => _victoryModalLayer != null &&
         GodotObject.IsInstanceValid(_victoryModalLayer);
@@ -1472,7 +1457,10 @@ public partial class CardButton : Control
         AddChild(_bg);
 
         _label = new Label();
-        _label.Text = $"[{Card.Info.Cost}费] {Card.Info.Name}\n\n{Card.Info.Description.Replace("{0}", Card.Info.Value.ToString())}";
+        string effectSummary = string.IsNullOrWhiteSpace(Card.Info.ExecutionSummary)
+            ? Card.Info.Description.Replace("{0}", Card.Info.Value.ToString())
+            : Card.Info.ExecutionSummary;
+        _label.Text = $"[{Card.Info.Cost}费] {Card.Info.Name}\n\n{effectSummary}";
         _label.SetPosition(new Vector2(8, 10));
         _label.Size = new Vector2(Mathf.Max(80f, Size.X - 16f), Mathf.Max(120f, Size.Y - 30f));
         _label.AddThemeFontSizeOverride("font_size", 13);

@@ -8,6 +8,8 @@ using System.Collections.Generic;
 /// </summary>
 public partial class MapController : Control
 {
+    [Export] public PackedScene SettingsDialogScene { get; set; }
+
     private TopBar _topBar;
 
     // ============ 主内容区（底页）============
@@ -76,7 +78,7 @@ public partial class MapController : Control
         _topBar.Size = new Vector2(1920, 44);
         _topBar.OnDeckPressed = () => DeckViewer.Show(this);
         _topBar.OnMapPressed = () => ToggleMap();
-        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this);
+        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this, SettingsDialogScene);
         AddChild(_topBar);
 
         // 主内容区（底页，道韵选择 / 节点信息都在这里渲染）

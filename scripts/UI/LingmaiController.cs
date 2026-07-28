@@ -6,16 +6,17 @@ using System.Collections.Generic;
 /// </summary>
 public partial class LingmaiController : Control
 {
+    [Export] public PackedScene SettingsDialogScene { get; set; }
+
     private Label _titleLabel;
     private Label _descriptionLabel;
     private Label _resultLabel;
     private VBoxContainer _optionContainer;
     private TopBar _topBar;
-    private MapOverlayController _mapOverlay;
+    private NodePageNavigationCoordinator _nodeNavigation;
+    private LingmaiActionCommand _actions;
     private MapNodeDefinition _lingmaiNode;
     private bool _invalidEntry;
-    private bool _healConsumed;
-    private bool _upgradeConsumed;
 
     public override void _Ready()
     {
@@ -26,7 +27,9 @@ public partial class LingmaiController : Control
         _topBar = GetNode<TopBar>("TopBar");
         _topBar.OnDeckPressed = () => DeckViewer.Show(this);
         _topBar.OnMapPressed = ToggleMapOverlay;
-        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this);
+        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this, SettingsDialogScene);
+        _nodeNavigation = new NodePageNavigationCoordinator(this, GameManager.Instance,
+            error => _resultLabel.Text = $"地图导航失败：{error}");
 
         _lingmaiNode = FindCurrentLingmaiNode();
         if (_lingmaiNode == null)
@@ -36,7 +39,8 @@ public partial class LingmaiController : Control
             return;
         }
 
-        NodeMapEntry.Add(this, ToggleMapOverlay, IsMapOverlayOpen);
+        _actions = new LingmaiActionCommand(GameManager.Instance);
+        NodeMapEntry.Add(this, ToggleMapOverlay);
         ShowOptions();
     }
 
@@ -102,27 +106,38 @@ public partial class LingmaiController : Control
         ClearOptions();
 
         int healAmount = Mathf.Max(1, Mathf.FloorToInt(gm.PlayerMaxHp * 0.3f));
-        bool canHeal = !_healConsumed && gm.PlayerHp < gm.PlayerMaxHp;
+        bool canHeal = _actions?.CanRest == true;
         var healButton = CreateButton(
             "休养生息",
             $"回复 {healAmount} 点生命（当前 {gm.PlayerHp}/{gm.PlayerMaxHp}）",
             canHeal,
-            canHeal ? "" : _healConsumed ? "本次灵脉的休养生息已使用" : "气血已满，无需休养");
+            canHeal ? "" : "本次灵脉的休养生息已使用");
         healButton.Pressed += OnHealPressed;
         _optionContainer.AddChild(healButton);
 
         var upgradeableCards = gm.GetUpgradeableCards();
-        bool canUpgrade = !_upgradeConsumed && upgradeableCards.Count > 0;
+        bool canUpgrade = _actions?.CanUpgrade == true && upgradeableCards.Count > 0;
         var upgradeButton = CreateButton(
             "精进道行",
             canUpgrade ? $"选择 1 张卡牌升级（可精进 {upgradeableCards.Count} 张）" : "暂无可精进的卡牌",
             canUpgrade,
-            canUpgrade ? "" : _upgradeConsumed ? "本次灵脉的精进道行已使用" : "暂无可精进的卡牌");
+            canUpgrade ? "" : _actions?.CanUpgrade == false ? "本次灵脉的精进道行已使用" : "暂无可精进的卡牌");
         upgradeButton.Pressed += () => ShowUpgradeChoices(upgradeableCards);
         _optionContainer.AddChild(upgradeButton);
 
-        var companionButton = CreateButton("疗愈道友", "当前无人同行", false, "当前无人同行");
-        _optionContainer.AddChild(companionButton);
+        var eligibleCompanions = gm.GetEligibleLingmaiHealingTargets();
+        foreach (var companion in eligibleCompanions)
+        {
+            bool canHealCompanion = _actions?.CanHealCompanion == true;
+            var companionButton = CreateButton(
+                $"疗愈道友：{companion.DisplayName}",
+                $"回复 {Mathf.Max(1, Mathf.FloorToInt(companion.MaxHp * 0.3f))} 点生命（当前 {companion.CurrentHp}/{companion.MaxHp}）",
+                canHealCompanion,
+                "本次灵脉的疗愈道友已使用");
+            string targetId = companion.MemberId;
+            companionButton.Pressed += () => OnHealCompanionPressed(targetId);
+            _optionContainer.AddChild(companionButton);
+        }
 
     }
 
@@ -154,72 +169,69 @@ public partial class LingmaiController : Control
 
     private void OnHealPressed()
     {
-        var gm = GameManager.Instance;
-        if (gm.PlayerHp >= gm.PlayerMaxHp)
+        LingmaiActionCommandResult action = null;
+        string error = "灵脉行动命令未初始化。";
+        if (_actions == null || !_actions.TryRest(out action, out error))
         {
-            GD.Print("[灵脉] 气血已满，休养生息未结算。");
-            ShowOptions();
+            ShowActionError(error);
             return;
         }
-
-        int oldHp = gm.PlayerHp;
-        int healAmount = Mathf.Max(1, Mathf.FloorToInt(gm.PlayerMaxHp * 0.3f));
-        gm.PlayerHp = Mathf.Min(gm.PlayerMaxHp, gm.PlayerHp + healAmount);
-        _healConsumed = true;
-        string result = $"休养生息，生命 {oldHp}/{gm.PlayerMaxHp} → {gm.PlayerHp}/{gm.PlayerMaxHp}";
-        GameManager.Instance.LastLingmaiResult = result;
-        _resultLabel.Text = result;
-        ShowOptions();
-        GD.Print($"[灵脉] {result}");
+        PresentAction(action);
     }
 
     private void OnUpgradeCardPressed(CardRuntime card, CardInfo upgradedInfo)
     {
-        string oldName = card.Info.Name;
-        if (!GameManager.Instance.TryUpgradeCard(card))
+        LingmaiActionCommandResult action = null;
+        string error = "灵脉行动命令未初始化。";
+        if (_actions == null || !_actions.TryUpgrade(card, out action, out error))
         {
-            GD.PrintErr("[灵脉] 精进道行失败：目标卡牌已不可升级或不在当前牌组。");
+            ShowActionError(error);
             ShowOptions();
             return;
         }
+        PresentAction(action);
+    }
 
-        _upgradeConsumed = true;
-        string result = $"精进道行，{oldName} → {upgradedInfo.Name}";
-        GameManager.Instance.LastLingmaiResult = result;
-        _resultLabel.Text = result;
+    private void OnHealCompanionPressed(string targetMemberId)
+    {
+        LingmaiActionCommandResult action = null;
+        string error = "灵脉行动命令未初始化。";
+        if (_actions == null || !_actions.TryHealCompanion(targetMemberId, out action, out error))
+        {
+            ShowActionError(error);
+            return;
+        }
+        PresentAction(action);
+    }
+
+    private void PresentAction(LingmaiActionCommandResult action)
+    {
+        _resultLabel.Text = action.Feedback;
         ShowOptions();
-        GD.Print($"[灵脉] {result}");
+        GD.Print($"[灵脉] {action.Feedback}");
+    }
+
+    private void ShowActionError(string error)
+    {
+        string message = string.IsNullOrWhiteSpace(error) ? "灵脉行动被拒绝。" : error;
+        GD.PrintErr($"[灵脉] 行动失败：{message}");
+        _resultLabel.Text = $"灵脉行动失败：{message}";
     }
 
     private void ToggleMapOverlay()
     {
-        if (_mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay))
+        if (_nodeNavigation == null)
         {
-            _mapOverlay.Close();
+            _resultLabel.Text = "地图导航服务未初始化，请查看日志。";
             return;
         }
-
-        _mapOverlay = MapOverlayController.Open(this, !_invalidEntry,
-            _invalidEntry ? null : OnMapNodePressed, () => _mapOverlay = null);
-        if (_mapOverlay == null)
-            _resultLabel.Text = "地图 overlay 创建失败，请查看日志。";
+        if (!_nodeNavigation.TryToggleMap(out var error) && !string.IsNullOrWhiteSpace(error))
+            _resultLabel.Text = $"地图 overlay 创建失败：{error}";
     }
 
-    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
-
-    private void OnMapNodePressed(MapNodeDefinition info)
+    public override void _ExitTree()
     {
-        if (info == null)
-            return;
-        var gm = GameManager.Instance;
-        if (!gm.TryTransitionAndRouteFromActiveServiceNode(info, out var transitionError))
-        {
-            GD.PrintErr($"[灵脉] 目标节点事务迁移失败：{transitionError}");
-            _resultLabel.Text = "进入下一节点失败，当前结果页已保留。";
-            return;
-        }
-        _mapOverlay?.CloseImmediately();
-        _mapOverlay = null;
+        _nodeNavigation?.Dispose();
     }
 
     private void ClearOptions()

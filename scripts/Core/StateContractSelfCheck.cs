@@ -21,6 +21,9 @@ public static class StateContractSelfCheck
         Ensure(manager.ActiveBattle.DrawPile.Count == permanentBeforeBattle.Count, "第一场战斗未完整复制永久套牌");
         foreach (var battleCard in manager.ActiveBattle.DrawPile)
             Ensure(!permanentBeforeBattle.Contains(battleCard), "战斗牌堆复用了永久 CardRuntime 引用");
+        foreach (var battleCard in manager.ActiveBattle.DrawPile)
+            Ensure(!permanentBeforeBattle.Any(permanentCard => ReferenceEquals(battleCard.Info, permanentCard.Info)),
+                "战斗牌堆复用了永久 CardInfo 投影引用");
 
         manager.StartPlayerTurn();
         Ensure(manager.Hand.Count == 5, "第一场战斗起手不是 5 张");
@@ -38,7 +41,8 @@ public static class StateContractSelfCheck
             "胜利结果未推进地图坐标");
         Ensure(!manager.SubmitNodeResult(victoryResult, out _), "同一 ResultId 重复提交未被拒绝");
 
-        manager.AddCardToDeck(DataDefs.RewardCardPool[0]);
+        Ensure(CardPoolCatalog.TryGet("reward_cards", out var rewardPool, out var rewardPoolError), rewardPoolError);
+        manager.AddCardToDeck(rewardPool.Cards[0]);
         Ensure(manager.GetDeckSize() == 11, "奖励卡没有写入永久套牌");
         Ensure(CountBattleCards(manager) == 10, "战斗结算奖励错误改变了已结束战斗牌堆");
         Ensure(manager.ExitBattleToMap(out var exitError), exitError);

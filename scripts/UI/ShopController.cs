@@ -4,6 +4,8 @@ using System.Collections.Generic;
 /// <summary>ACT1 商店最小页面：稳定三卡库存、购买和离开结算。</summary>
 public partial class ShopController : Control
 {
+    [Export] public PackedScene SettingsDialogScene { get; set; }
+
     private Label _titleLabel;
     private Label _descriptionLabel;
     private Label _resultLabel;
@@ -12,8 +14,8 @@ public partial class ShopController : Control
     private IReadOnlyList<int> _prices = System.Array.Empty<int>();
     private readonly List<Button> _purchaseButtons = new();
     private TopBar _topBar;
-    private MapOverlayController _mapOverlay;
-    private bool[] _sold = System.Array.Empty<bool>();
+    private NodePageNavigationCoordinator _nodeNavigation;
+    private ShopPurchaseCommand _purchaseCommand;
     private bool _invalidEntry;
     private ShopDefinition _shopDefinition;
 
@@ -26,7 +28,9 @@ public partial class ShopController : Control
         _topBar = GetNode<TopBar>("TopBar");
         _topBar.OnDeckPressed = () => DeckViewer.Show(this);
         _topBar.OnMapPressed = ToggleMapOverlay;
-        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this);
+        _topBar.OnSettingsPressed = () => SettingsHelper.Show(this, SettingsDialogScene);
+        _nodeNavigation = new NodePageNavigationCoordinator(this, GameManager.Instance,
+            error => _resultLabel.Text = $"地图导航失败：{error}");
 
         var gm = GameManager.Instance;
         var node = gm.ActiveNode == null ? null : gm.MapGraph?.GetNode(gm.ActiveNode.NodeId);
@@ -53,7 +57,7 @@ public partial class ShopController : Control
             ShowInvalidState();
             return;
         }
-        NodeMapEntry.Add(this, ToggleMapOverlay, IsMapOverlayOpen);
+        NodeMapEntry.Add(this, ToggleMapOverlay);
         RefreshItems();
     }
 
@@ -68,7 +72,16 @@ public partial class ShopController : Control
         _inventory.Clear();
         _inventory.AddRange(inventory.Cards);
         _prices = inventory.Prices;
-        _sold = new bool[_inventory.Count];
+        try
+        {
+            _purchaseCommand = new ShopPurchaseCommand(GameManager.Instance.RunState, _inventory, _prices);
+        }
+        catch (System.Exception exception)
+        {
+            error = $"商店购买命令初始化失败：{exception.Message}";
+            GD.PrintErr($"[商店] {error}");
+            return false;
+        }
         return true;
     }
 
@@ -87,38 +100,39 @@ public partial class ShopController : Control
             int price = _prices[i];
             var button = new Button
             {
-                Text = _sold[i]
+                Text = _purchaseCommand.IsSold(i)
                     ? $"已售出  { _inventory[i].Name }"
                     : $"{_inventory[i].Name}  | {price} 灵韵\n{_inventory[i].Description.Replace("{0}", _inventory[i].Value.ToString())}",
                 CustomMinimumSize = new Vector2(560, 82),
-                Disabled = _sold[i] || GameManager.Instance.LingYun < price,
+                Disabled = _purchaseCommand.IsSold(i) || GameManager.Instance.LingYun < price,
             };
             button.AddThemeFontSizeOverride("font_size", 16);
-            if (!_sold[i] && GameManager.Instance.LingYun < price)
+            if (!_purchaseCommand.IsSold(i) && GameManager.Instance.LingYun < price)
                 button.TooltipText = "灵韵不足";
-            button.Pressed += () => BuyCard(index, price);
+            button.Pressed += () => BuyCard(index);
             _itemContainer.AddChild(button);
             _purchaseButtons.Add(button);
         }
 
     }
 
-    private void BuyCard(int index, int price)
+    private void BuyCard(int index)
     {
-        if (index < 0 || index >= _inventory.Count || _sold[index])
-            return;
-        var gm = GameManager.Instance;
-        if (gm.LingYun < price)
+        if (_purchaseCommand == null)
         {
-            _resultLabel.Text = "灵韵不足，未购买卡牌。";
-            GD.PrintErr("[商店] 购买被拒绝：灵韵不足。");
+            _resultLabel.Text = "商店购买服务未初始化，请查看日志。";
+            GD.PrintErr("[商店] 购买被拒绝：购买命令为空。");
             return;
         }
 
-        gm.LingYun -= price;
-        gm.AddCardToDeck(_inventory[index]);
-        _sold[index] = true;
-        GD.Print($"[商店] 已购买：{_inventory[index].Id}，价格={price}");
+        if (!_purchaseCommand.TryPurchase(index, out var result))
+        {
+            _resultLabel.Text = result.Message;
+            GD.PrintErr($"[商店] 购买被拒绝：{result.Message}");
+            return;
+        }
+
+        GD.Print($"[商店] 已购买：{result.CardDefinitionId}，价格={result.Price}");
         RefreshItems();
     }
 
@@ -147,32 +161,17 @@ public partial class ShopController : Control
 
     private void ToggleMapOverlay()
     {
-        if (_mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay))
+        if (_nodeNavigation == null)
         {
-            _mapOverlay.Close();
+            _resultLabel.Text = "地图导航服务未初始化，请查看日志。";
             return;
         }
-
-        _mapOverlay = MapOverlayController.Open(this, !_invalidEntry,
-            _invalidEntry ? null : OnMapNodePressed, () => _mapOverlay = null);
-        if (_mapOverlay == null)
-            _resultLabel.Text = "地图 overlay 创建失败，请查看日志。";
+        if (!_nodeNavigation.TryToggleMap(out var error) && !string.IsNullOrWhiteSpace(error))
+            _resultLabel.Text = $"地图 overlay 创建失败：{error}";
     }
 
-    private bool IsMapOverlayOpen() => _mapOverlay != null && GodotObject.IsInstanceValid(_mapOverlay);
-
-    private void OnMapNodePressed(MapNodeDefinition info)
+    public override void _ExitTree()
     {
-        if (info == null)
-            return;
-        var gm = GameManager.Instance;
-        if (!gm.TryTransitionAndRouteFromActiveServiceNode(info, out var transitionError))
-        {
-            GD.PrintErr($"[商店] 目标节点事务迁移失败：{transitionError}");
-            _resultLabel.Text = "进入下一节点失败，当前商店结果页已保留。";
-            return;
-        }
-        _mapOverlay?.CloseImmediately();
-        _mapOverlay = null;
+        _nodeNavigation?.Dispose();
     }
 }

@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CardDefinitionResource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/Data/CardDefinitionResource.cs" id="1"]
+[resource]
+script = ExtResource("1")
+Id = "wx_r_005"
+DisplayName = "血挡"
+DescriptionFallback = "失去2点生命，获得{0}点护体"
+OwnerCharacterId = "wuzhu"
+Category = 1
+Costs = [{ "costType": 0, "amount": 1, "timing": 0, "failurePolicy": 0, "canCauseDefeat": false }]
+TargetPolicy = { "selectionMode": 0, "scope": 1, "minimumTargets": 0, "maximumTargets": 0, "allowDeadTargets": false, "retargetOnInvalid": 0 }
+Effects = [{ "order": 1, "effectType": 2, "targetSelector": 1, "amount": 2, "statusKind": 0, "durationScope": 0, "destinationZone": 0 }, { "order": 2, "effectType": 1, "targetSelector": 1, "amount": 10, "statusKind": 0, "durationScope": 0, "destinationZone": 0 }]
+RewardPoolIds = ["reward_cards"]
+Upgrade = { "canUpgrade": false, "nextCardId": "", "familyId": "wx_r_005" }
+Tags = ["wuzhu", "reward", "block", "self_harm"]
+Availability = { "minContentVersion": "1.1.0" }
+Preview = { "frameKey": "default_card" }
+Balance = { "role": "reward_self_harm_block", "balanceVersion": "B1-20260720" }

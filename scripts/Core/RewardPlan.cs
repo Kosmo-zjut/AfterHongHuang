@@ -127,6 +127,7 @@ public static class RewardPlanValidator
             return null;
         return new CardInfo
         {
+            DefinitionId = source.DefinitionId,
             Id = source.Id,
             Name = source.Name,
             Type = source.Type,

@@ -23,6 +23,8 @@ public sealed class RunState
     public MapGraph MapGraph { get; set; }
     public List<CardRuntime> PermanentDeck { get; } = new();
     public List<DaoMarkInfo> DaoMarks { get; } = new();
+    /// <summary>Run-level party state used by future node interactions such as ally healing.</summary>
+    public PartyRoster Party { get; } = new();
     public bool DaoMarkSelected { get; set; }
     public List<DaoMarkInfo> CurrentChoices { get; } = new();
     public Dictionary<string, NodeLifecycleState> NodeStates { get; } = new();

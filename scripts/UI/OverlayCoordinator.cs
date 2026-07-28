@@ -14,11 +14,12 @@ public static class OverlayCoordinator
     public const int MapAndUtilityZIndexMax = 469;
     public const int CardRewardZIndex = 470;
     public const int CardRewardZIndexMax = 489;
-    // The upper edge of the CardReward plane is reserved for global operations. It stays
-    // above a content-only reward blocker while remaining below the Transition/Error plane.
-    public const int GlobalOperationZIndex = CardRewardZIndexMax;
-    public const int TransitionAndErrorZIndex = 490;
-    public const int TransitionAndErrorZIndexMax = 499;
+    // The map is a page-owned cover layer, not a utility drawer. It must cover an optional
+    // CardReward child without cancelling it, then reveal the unchanged child on close.
+    public const int MapCoverZIndex = 490;
+    public const int MapCoverZIndexMax = 499;
+    public const int TransitionAndErrorZIndex = 500;
+    public const int TransitionAndErrorZIndexMax = 509;
 
     private static Node _mapOverlay;
     private static Node _deckOverlay;
@@ -27,15 +28,12 @@ public static class OverlayCoordinator
     private static Node _cardRewardOverlay;
 
     /// <summary>
-    /// Prepares the shared map layer without dismissing an active victory modal.
-    /// A TopBar map request is global, so it closes only the optional CardReward child overlay.
+    /// Prepares the shared map cover without dismissing the current node page or its optional
+    /// CardReward child. Closing the map must reveal exactly the same reward candidates/progress.
     /// </summary>
     public static bool TryPrepareMap(out string error)
     {
         error = "";
-        if (!TryDismissCardRewardForGlobalEntry(out error))
-            return false;
-
         CloseAndClear(ref _deckOverlay);
         CloseAndClear(ref _settingsOverlay);
         return true;

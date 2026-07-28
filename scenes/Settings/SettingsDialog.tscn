@@ -1,0 +1,165 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/UI/SettingsDialogController.cs" id="1_controller"]
+[ext_resource type="PackedScene" path="res://scenes/Settings/VolumeRow.tscn" id="2_volume"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_settings_panel"]
+bg_color = Color(0.12, 0.09, 0.07, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.46, 0.36, 0.24, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_settings_separator"]
+bg_color = Color(0.46, 0.36, 0.24, 0.5)
+corner_radius_top_left = 1
+corner_radius_top_right = 1
+corner_radius_bottom_right = 1
+corner_radius_bottom_left = 1
+
+[node name="SettingsDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+visible = false
+script = ExtResource("1_controller")
+
+[node name="ContentScrim" type="ColorRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.02, 0.015, 0.012, 0.64)
+
+[node name="Panel" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(760, 660)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -380.0
+offset_top = -330.0
+offset_right = 380.0
+offset_bottom = 330.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBox_settings_panel")
+
+[node name="Margin" type="MarginContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="Layout" type="VBoxContainer" parent="Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="TitleBar" type="HBoxContainer" parent="Panel/Margin/Layout"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Panel/Margin/Layout/TitleBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 30
+text = "设置"
+vertical_alignment = 1
+
+[node name="CloseButton" type="Button" parent="Panel/Margin/Layout/TitleBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+focus_neighbor_left = NodePath(".")
+text = "×"
+tooltip_text = "关闭设置"
+
+[node name="BodyScroll" type="ScrollContainer" parent="Panel/Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Body" type="VBoxContainer" parent="Panel/Margin/Layout/BodyScroll"]
+custom_minimum_size = Vector2(0, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="SoundTitle" type="Label" parent="Panel/Margin/Layout/BodyScroll/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "声音"
+
+[node name="MasterVolume" parent="Panel/Margin/Layout/BodyScroll/Body" instance=ExtResource("2_volume")]
+unique_name_in_owner = true
+DisplayLabel = "总音量"
+Channel = 0
+
+[node name="MusicVolume" parent="Panel/Margin/Layout/BodyScroll/Body" instance=ExtResource("2_volume")]
+unique_name_in_owner = true
+DisplayLabel = "音乐"
+Channel = 1
+
+[node name="SfxVolume" parent="Panel/Margin/Layout/BodyScroll/Body" instance=ExtResource("2_volume")]
+unique_name_in_owner = true
+DisplayLabel = "音效"
+Channel = 2
+
+[node name="AudioStatus" type="Label" parent="Panel/Margin/Layout/BodyScroll/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 2
+text = ""
+visible = false
+
+[node name="Separator" type="HSeparator" parent="Panel/Margin/Layout/BodyScroll/Body"]
+layout_mode = 2
+theme_override_styles/separator = SubResource("StyleBox_settings_separator")
+
+[node name="DisplayTitle" type="Label" parent="Panel/Margin/Layout/BodyScroll/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "显示"
+
+[node name="ResolutionRow" type="HBoxContainer" parent="Panel/Margin/Layout/BodyScroll/Body"]
+custom_minimum_size = Vector2(0, 56)
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="ResolutionLabel" type="Label" parent="Panel/Margin/Layout/BodyScroll/Body/ResolutionRow"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+size_flags_vertical = 4
+text = "画面分辨率"
+vertical_alignment = 1
+
+[node name="ResolutionOptions" type="OptionButton" parent="Panel/Margin/Layout/BodyScroll/Body/ResolutionRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+
+[node name="ResolutionStatus" type="Label" parent="Panel/Margin/Layout/BodyScroll/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+autowrap_mode = 2
+text = "显示设置状态"

@@ -1,0 +1,5 @@
+[gd_resource type="VideoStreamTheora" format=3]
+
+[resource]
+file = "res://resources/video/title_background.ogv"
+loop = true
