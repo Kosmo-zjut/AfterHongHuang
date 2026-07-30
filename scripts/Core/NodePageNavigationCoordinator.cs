@@ -28,12 +28,15 @@ public sealed class NodePageNavigationCoordinator : IDisposable
     /// </summary>
     public bool TryToggleMap(out string error)
     {
-        error = "";
-        if (IsOverlayAlive())
+        if (!TryPrepareMapToggle(IsOverlayAlive, () => _mapOverlay.Close(), out bool closedExisting,
+                out error))
         {
-            _mapOverlay.Close();
-            return true;
+            Report(error);
+            return false;
         }
+
+        if (closedExisting)
+            return true;
 
         if (!_gameManager.TryGetNodePageMapInteractivity(out bool interactive, out error))
         {
@@ -50,6 +53,39 @@ public sealed class NodePageNavigationCoordinator : IDisposable
         Report(error);
         return false;
     }
+
+    /// <summary>
+    /// Runs the common ordering for a map toggle: close GlobalSettings first, then close an
+    /// existing map or leave the caller to open one. The delegates keep the ordering proof
+    /// testable without constructing a second production navigation implementation.
+    /// </summary>
+    private static bool TryPrepareMapToggle(Func<bool> isOverlayAlive, Action closeOverlay,
+        out bool closedExisting, out string error)
+    {
+        closedExisting = false;
+        error = "";
+        if (isOverlayAlive == null || closeOverlay == null)
+        {
+            error = "地图 toggle 缺少有效的 overlay 生命周期操作。";
+            return false;
+        }
+
+        if (!OverlayCoordinator.TryPrepareMap(out error))
+            return false;
+
+        if (isOverlayAlive())
+        {
+            closeOverlay();
+            closedExisting = true;
+        }
+
+        return true;
+    }
+
+    /// <summary>供同程序集自检复用生产 toggle 顺序，不改变真实页面路由。</summary>
+    internal static bool TryPrepareMapToggleForSelfCheck(Func<bool> isOverlayAlive, Action closeOverlay,
+        out bool closedExisting, out string error) =>
+        TryPrepareMapToggle(isOverlayAlive, closeOverlay, out closedExisting, out error);
 
     /// <summary>Ensures scene teardown unregisters a still-open overlay without changing RunState.</summary>
     public void Dispose()

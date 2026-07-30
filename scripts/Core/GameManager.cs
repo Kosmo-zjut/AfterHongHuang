@@ -341,30 +341,111 @@ public partial class GameManager : Node
     /// <summary>仅消费玩家确认时冻结的同一解析对象；不允许执行端重新计算卡牌事实。</summary>
     public bool PlayCard(CardRuntime card, ResolvedCardExecution resolved)
     {
-        if (!Hand.Contains(card) || resolved == null) return false;
-        if (resolved.Plan.EnergyCost > PlayerLingli) return false;
-
-        var snapshot = EnemyTurnSnapshot.Capture(this);
-        PlayerLingli -= resolved.Plan.EnergyCost;
-        if (!TryExecuteResolvedCard(card, resolved, out var exhausts, out var executionError))
+        if (!TryValidateResolvedCardForPlay(card, resolved, out var validationError))
         {
-            snapshot.Restore(this);
-            GD.PrintErr($"[GameManager] 出牌执行被阻止：{executionError}");
+            GD.PrintErr($"[GameManager] 出牌被阻止：{validationError}");
             return false;
         }
 
-        // 出牌可能改变敌方护体破盾/当前效果条件，下一次 UI 刷新必须重新解析预告。
-        if (_activeBattle != null)
-            _activeBattle.PreparedEnemyIntent = null;
+        var snapshot = EnemyTurnSnapshot.Capture(this);
+        var previousTrace = new List<CardExecutionTraceEntry>(_lastCardExecutionTrace);
+        var previousResolved = _lastResolvedCardExecution;
+        try
+        {
+            // The frozen fingerprint is validated before this deduction. Applying the fee is
+            // therefore part of the same transaction, not a reason to invalidate its own plan.
+            PlayerLingli -= resolved.Plan.EnergyCost;
+            if (!TryApplyResolvedCard(card, resolved, out var exhausts, out var executionError))
+            {
+                snapshot.Restore(this);
+                RestoreCardExecutionDiagnostics(previousTrace, previousResolved);
+                GD.PrintErr($"[GameManager] 出牌执行被阻止：{executionError}");
+                return false;
+            }
 
-        Hand.Remove(card);
-        if (exhausts)
-            ExhaustPile.Add(card);
-        else
-            DiscardPile.Add(card);
-        if (_activeBattle != null)
-            _activeBattle.IntentStateVersion++;
+            // 出牌可能改变敌方护体破盾/当前效果条件，下一次 UI 刷新必须重新解析预告。
+            if (_activeBattle != null)
+                _activeBattle.PreparedEnemyIntent = null;
+
+            Hand.Remove(card);
+            if (exhausts)
+                ExhaustPile.Add(card);
+            else
+                DiscardPile.Add(card);
+            if (_activeBattle != null)
+                _activeBattle.IntentStateVersion++;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            snapshot.Restore(this);
+            RestoreCardExecutionDiagnostics(previousTrace, previousResolved);
+            GD.PrintErr($"[GameManager] 出牌事务异常，已回滚：{exception.Message}");
+            return false;
+        }
+    }
+
+    private bool TryValidateResolvedCardForPlay(CardRuntime card, ResolvedCardExecution resolved,
+        out string error)
+    {
+        error = "";
+        if (_activeBattle == null)
+        {
+            error = "当前没有活动战斗。";
+            return false;
+        }
+        if (card == null || !Hand.Contains(card))
+        {
+            error = "卡牌不在当前手牌。";
+            return false;
+        }
+        if (resolved == null || resolved.Plan == null)
+        {
+            error = "缺少目标确认时冻结的执行计划。";
+            return false;
+        }
+        if (!ReferenceEquals(resolved.Plan, card.ExecutionPlan))
+        {
+            error = "执行计划不属于当前卡牌实例。";
+            return false;
+        }
+        if (card.Info == null || !string.Equals(card.Info.DefinitionId ?? card.Info.Id,
+                resolved.Plan.CardId, StringComparison.Ordinal))
+        {
+            error = "卡牌兼容投影与执行计划身份不匹配。";
+            return false;
+        }
+        if (!CardDefinitionValidator.TryValidateExecutionPlan(resolved.Plan, out var planError))
+        {
+            error = $"执行计划校验失败：{planError}";
+            return false;
+        }
+        if (resolved.Plan.EnergyCost > PlayerLingli)
+        {
+            error = "当前灵力不足。";
+            return false;
+        }
+        if (resolved.Plan.TargetPolicy.Scope == CardTargetScope.SingleEnemy && EnemyHp <= 0)
+        {
+            error = "敌方目标不可用。";
+            return false;
+        }
+        if (resolved.BattleStateVersion != _activeBattle.IntentStateVersion ||
+            resolved.StateFingerprint != BuildCardStateFingerprint())
+        {
+            error = "出牌解析结果已失效，拒绝执行旧计划。";
+            return false;
+        }
         return true;
+    }
+
+    private void RestoreCardExecutionDiagnostics(IReadOnlyList<CardExecutionTraceEntry> trace,
+        ResolvedCardExecution resolved)
+    {
+        _lastCardExecutionTrace.Clear();
+        if (trace != null)
+            _lastCardExecutionTrace.AddRange(trace);
+        _lastResolvedCardExecution = resolved;
     }
 
     /// <summary>将目标条件和当前战斗快照冻结为唯一执行事实，UI 确认提示可直接消费 Summary。</summary>
@@ -372,6 +453,16 @@ public partial class GameManager : Node
     {
         resolved = null;
         error = "";
+        if (_activeBattle == null)
+        {
+            error = "当前没有活动战斗。";
+            return false;
+        }
+        if (card == null || !Hand.Contains(card))
+        {
+            error = "卡牌不在当前手牌。";
+            return false;
+        }
         if (card == null || card.ExecutionPlan == null || card.Info == null)
         {
             error = "卡牌缺少已验证执行计划。";
@@ -404,15 +495,13 @@ public partial class GameManager : Node
     }
 
     /// <summary>按冻结计划的顺序执行效果；旧 CardInfo 聚合字段只供兼容卡面展示。</summary>
-    private bool TryExecuteResolvedCard(CardRuntime card, ResolvedCardExecution resolved, out bool exhausts, out string error)
+    private bool TryApplyResolvedCard(CardRuntime card, ResolvedCardExecution resolved, out bool exhausts, out string error)
     {
         exhausts = false;
         error = "";
-        if (resolved == null || !ReferenceEquals(resolved.Plan, card.ExecutionPlan) ||
-            resolved.BattleStateVersion != (_activeBattle?.IntentStateVersion ?? 0) ||
-            resolved.StateFingerprint != BuildCardStateFingerprint())
+        if (resolved == null || card == null || !ReferenceEquals(resolved.Plan, card.ExecutionPlan))
         {
-            error = "出牌解析结果已失效，拒绝执行旧计划。";
+            error = "执行计划不属于当前卡牌实例。";
             return false;
         }
         _lastCardExecutionTrace.Clear();
@@ -3102,6 +3191,69 @@ public partial class GameManager : Node
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Abandons the current run without submitting a node result or reward, then routes to the
+    /// title through the core scene boundary. This deliberately clears in-memory run state because
+    /// the current MVP has no save/resume contract to preserve.
+    /// </summary>
+    public bool TryAbandonRunToTitle(out string error)
+    {
+        error = "";
+        ClearRunStateForAbandon();
+        return ChangeSceneToFile("res://scenes/Title/Title.tscn", out error);
+    }
+
+    /// <summary>仅供 Debug 启动自检验证放弃本局的状态清理，不执行场景切换。</summary>
+    internal bool TryClearRunStateForSelfCheck(out string error)
+    {
+        error = "";
+        ClearRunStateForAbandon();
+        return true;
+    }
+
+    private void ClearRunStateForAbandon()
+    {
+        DisposeBattleState();
+        ActiveNode = null;
+        ActiveEncounter = null;
+        _activeResultSubmitted = false;
+        _nextNodeResultSequence = 0;
+        _lastCardExecutionTrace.Clear();
+        _lastResolvedCardExecution = null;
+
+        _runState.PermanentDeck.Clear();
+        _runState.DaoMarks.Clear();
+        _runState.Party.Clear();
+        _runState.CurrentChoices.Clear();
+        _runState.NodeStates.Clear();
+        _runState.CompletedNodeIds.Clear();
+        _runState.AppliedResultIds.Clear();
+        _runState.AppliedRouteResultIds.Clear();
+        _runState.MapGraph = null;
+        _runState.MapNodesUnlocked = false;
+        _runState.DaoMarkSelected = false;
+        _runState.PlayerMaxHp = 0;
+        _runState.PlayerHp = 0;
+        _runState.PlayerMaxLingli = 0;
+        _runState.LingYun = 0;
+        _runState.UnclaimedLingYun = 0;
+        _runState.ActIndex = 0;
+        _runState.ActId = "";
+        _runState.RuleVersion = 0;
+        _runState.RunSeed = 0;
+        _runState.CurrentMapLayer = 0;
+        _runState.CurrentMapIndex = 0;
+        _runState.CurrentMapNodeId = string.Empty;
+
+        CharacterId = null;
+        SelectedCharacter = null;
+        Difficulty = "地仙";
+        _navigationState.OpenMapOnEnter = false;
+        _navigationState.MapEntryMode = MapEntryMode.None;
+        _navigationState.LastLingmaiResult = "";
+        CurrentState = PlayerState.空闲;
     }
 
     /// <summary>旧场景入口兼容包装；正式节点流程使用 ChangeSceneToFile。</summary>

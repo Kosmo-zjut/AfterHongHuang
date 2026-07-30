@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 
 /// <summary>
 /// 节点页共享地图 overlay。地图数据和可达性仍由 MapRenderer/RunState 提供，
@@ -27,6 +28,8 @@ public partial class MapOverlayController : Control
     private Control _inputBlocker;
     private ScrollContainer _viewport;
     private Control _mapContent;
+    private Control _interactionRegion;
+    private readonly List<Control> _pointerControls = new();
     private bool _interactive;
     private bool _animating;
     private bool _closing;
@@ -91,6 +94,7 @@ public partial class MapOverlayController : Control
         if (_closing || _panel == null)
             return;
         _closing = true;
+        ResetPointerGesture(true);
         AnimateClose();
     }
 
@@ -100,6 +104,7 @@ public partial class MapOverlayController : Control
         if (_closing)
             return;
         _closing = true;
+        ResetPointerGesture(true);
         OverlayCoordinator.Unregister(this);
         QueueFree();
         _onClosed?.Invoke();
@@ -203,8 +208,19 @@ public partial class MapOverlayController : Control
                 MouseFilter = MouseFilterEnum.Ignore,
             };
             _viewport.AddChild(_mapContent);
+            _interactionRegion = new Control
+            {
+                Name = "MapInteractionRegion",
+                Position = Vector2.Zero,
+                Size = new Vector2(contentWidth, ViewHeight),
+                MouseFilter = MouseFilterEnum.Stop,
+            };
+            _interactionRegion.GuiInput += OnMapGuiInput;
+            _mapContent.AddChild(_interactionRegion);
+            _viewport.MouseExited += OnViewportMouseExited;
             MapRenderer.BuildInteractiveMap(_mapContent, MapRenderer.MarginLeft, 0f,
                 OnMapNodePressed);
+            RegisterNodePointerControls();
             // 等 ScrollContainer 完成内容测量后居中整个地图内容；这只影响视口布局，
             // 不参与 MapScene 导航，也不依赖任何 deferred 入口标记。
             CenterMapContentAfterLayout();
@@ -276,7 +292,7 @@ public partial class MapOverlayController : Control
 
     private void OnMapNodePressed(int layer, int nodeIndex)
     {
-        if (_suppressNextNodeClick)
+        if (_dragging || _suppressNextNodeClick)
         {
             _suppressNextNodeClick = false;
             return;
@@ -303,28 +319,29 @@ public partial class MapOverlayController : Control
         _onNodePressed?.Invoke(node);
     }
 
-    public override void _Input(InputEvent @event)
+    /// <summary>
+    /// Owns map pointer input only inside the map viewport. Buttons are registered to this same
+    /// owner, so a drag may begin on a node and continue after the pointer leaves its Button.
+    /// </summary>
+    private void OnMapGuiInput(InputEvent inputEvent)
     {
-        if (_closing || _viewport == null)
+        if (_closing || _viewport == null || !IsViewportPoint(GetViewport().GetMousePosition()))
             return;
 
-        if (@event is InputEventMouseButton mouseButton)
+        if (inputEvent is InputEventMouseButton mouseButton)
         {
             if (mouseButton.ButtonIndex == MouseButton.WheelUp || mouseButton.ButtonIndex == MouseButton.WheelDown)
             {
-                if (_viewport.GetGlobalRect().HasPoint(mouseButton.Position))
-                {
-                    float delta = mouseButton.ButtonIndex == MouseButton.WheelUp ? -WheelStep : WheelStep;
-                    SetHorizontalScroll(_viewport.GetHScrollBar().Value + delta);
-                    GetViewport().SetInputAsHandled();
-                }
+                float delta = mouseButton.ButtonIndex == MouseButton.WheelUp ? -WheelStep : WheelStep;
+                SetHorizontalScroll(_viewport.GetHScrollBar().Value + delta);
+                GetViewport().SetInputAsHandled();
                 return;
             }
 
             if (mouseButton.ButtonIndex != MouseButton.Left)
                 return;
 
-            if (mouseButton.Pressed && _viewport.GetGlobalRect().HasPoint(mouseButton.Position))
+            if (mouseButton.Pressed)
             {
                 _pointerDown = true;
                 _dragging = false;
@@ -337,21 +354,73 @@ public partial class MapOverlayController : Control
                 if (_dragging)
                     _suppressNextNodeClick = true;
                 _pointerDown = false;
+                if (_dragging)
+                    GetViewport().SetInputAsHandled();
                 _dragging = false;
             }
         }
-        else if (@event is InputEventMouseMotion motion && _pointerDown)
+        else if (inputEvent is InputEventMouseMotion && _pointerDown)
         {
-            float distance = motion.Position.DistanceTo(_pointerStart);
+            Vector2 pointerPosition = GetViewport().GetMousePosition();
+            float distance = pointerPosition.DistanceTo(_pointerStart);
             if (!_dragging && distance >= DragThreshold)
                 _dragging = true;
             if (_dragging)
             {
-                float target = _scrollStart - (motion.Position.X - _pointerStart.X);
+                float target = _scrollStart - (pointerPosition.X - _pointerStart.X);
                 SetHorizontalScroll(target);
                 GetViewport().SetInputAsHandled();
             }
         }
+    }
+
+    private void RegisterNodePointerControls()
+    {
+        _pointerControls.Clear();
+        if (_mapContent == null)
+            return;
+
+        foreach (Node child in _mapContent.GetChildren())
+        {
+            if (child is not Button button)
+                continue;
+
+            button.GuiInput += OnMapGuiInput;
+            _pointerControls.Add(button);
+        }
+    }
+
+    private bool IsViewportPoint(Vector2 globalPoint) =>
+        _viewport != null && _viewport.GetGlobalRect().HasPoint(globalPoint);
+
+    private void OnViewportMouseExited()
+    {
+        if (_pointerDown && _dragging)
+            _suppressNextNodeClick = true;
+        ResetPointerGesture(false);
+    }
+
+    private void ResetPointerGesture(bool suppressPendingClick)
+    {
+        if (suppressPendingClick && _pointerDown && _dragging)
+            _suppressNextNodeClick = true;
+        _pointerDown = false;
+        _dragging = false;
+    }
+
+    public override void _ExitTree()
+    {
+        ResetPointerGesture(true);
+        if (_interactionRegion != null && GodotObject.IsInstanceValid(_interactionRegion))
+            _interactionRegion.GuiInput -= OnMapGuiInput;
+        if (_viewport != null && GodotObject.IsInstanceValid(_viewport))
+            _viewport.MouseExited -= OnViewportMouseExited;
+        foreach (var control in _pointerControls)
+        {
+            if (control is Button button && GodotObject.IsInstanceValid(button))
+                button.GuiInput -= OnMapGuiInput;
+        }
+        _pointerControls.Clear();
     }
 
     /// <summary>

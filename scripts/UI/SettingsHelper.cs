@@ -2,7 +2,7 @@ using Godot;
 
 /// <summary>
 /// Coordinates one shared SettingsDialog instance. The dialog scene owns presentation and input;
-/// this helper only owns its cross-page lifetime and resolves the host's TopBar inset.
+/// this helper only owns its cross-page lifetime and submits the optional in-game abandon intent.
 /// </summary>
 public static class SettingsHelper
 {
@@ -64,13 +64,7 @@ public static class SettingsHelper
             return false;
         }
 
-        if (!dialog.TrySetContentTopInset(ResolveTopBarInset(parent), out error))
-        {
-            dialog.QueueFree();
-            return false;
-        }
-
-        if (!OverlayCoordinator.TryPrepareUtilityOverlay("设置", out error))
+        if (!dialog.TrySetInGameMode(parent is not TitleController, out error))
         {
             dialog.QueueFree();
             return false;
@@ -78,8 +72,17 @@ public static class SettingsHelper
 
         _currentDialog = dialog;
         dialog.CloseRequestedByUser += CloseCurrentDialog;
+        dialog.AbandonRunRequested += OnAbandonRunRequested;
         dialog.TreeExited += OnDialogTreeExited;
-        OverlayCoordinator.RegisterSettings(dialog);
+        if (!OverlayCoordinator.TryPrepareGlobalSettings(dialog, CloseCurrentDialog, out error))
+        {
+            dialog.CloseRequestedByUser -= CloseCurrentDialog;
+            dialog.AbandonRunRequested -= OnAbandonRunRequested;
+            dialog.TreeExited -= OnDialogTreeExited;
+            _currentDialog = null;
+            dialog.QueueFree();
+            return false;
+        }
         PresentDialog(dialog);
         return true;
     }
@@ -93,32 +96,36 @@ public static class SettingsHelper
             return;
 
         dialog.CloseRequestedByUser -= CloseCurrentDialog;
+        dialog.AbandonRunRequested -= OnAbandonRunRequested;
         dialog.TreeExited -= OnDialogTreeExited;
         OverlayCoordinator.Unregister(dialog);
         dialog.QueueFree();
     }
 
-    private static float ResolveTopBarInset(Node parent)
+    private static void OnAbandonRunRequested()
     {
-        float inset = 0.0f;
-        foreach (Node child in parent.GetChildren())
+        var dialog = _currentDialog;
+        var manager = GameManager.Instance;
+        if (manager == null || !GodotObject.IsInstanceValid(manager))
         {
-            if (child is not TopBar topBar || !GodotObject.IsInstanceValid(topBar) || !topBar.Visible)
-                continue;
-
-            float currentHeight = topBar.Size.Y;
-            float minimumHeight = topBar.CustomMinimumSize.Y;
-            float combinedMinimumHeight = topBar.GetCombinedMinimumSize().Y;
-            inset = Mathf.Max(inset, currentHeight);
-            inset = Mathf.Max(inset, minimumHeight);
-            inset = Mathf.Max(inset, combinedMinimumHeight);
+            dialog?.ShowOperationError("游戏状态管理器不可用，无法返回主菜单。 ");
+            return;
         }
 
-        return inset;
+        if (!manager.TryAbandonRunToTitle(out var error))
+        {
+            dialog?.ShowOperationError(error);
+            return;
+        }
+
+        // Scene teardown will release the dialog. Do not close it first: the core route owns the
+        // abandon transition, and a route failure must leave the current settings page visible.
     }
 
     private static void OnDialogTreeExited()
     {
+        if (_currentDialog != null && GodotObject.IsInstanceValid(_currentDialog))
+            OverlayCoordinator.Unregister(_currentDialog);
         _currentDialog = null;
     }
 

@@ -56,6 +56,23 @@ public static class MapRenderer
         return IsNodeAccessible(graph.Layers[layer][nodeIndex]);
     }
 
+    /// <summary>
+    /// Resolves the visual current marker without changing route semantics. An active node is the
+    /// page currently being played; CurrentMapNodeId remains the last settled route position.
+    /// </summary>
+    public static bool IsNodeCurrentForDisplay(GameManager gm, MapNodeDefinition node)
+    {
+        if (gm == null || node == null)
+            return false;
+
+        if (gm.ActiveNode != null &&
+            gm.RunState.NodeStates.TryGetValue(gm.ActiveNode.NodeId, out var lifecycle) &&
+            lifecycle == NodeLifecycleState.Active)
+            return gm.ActiveNode.NodeId == node.NodeId;
+
+        return gm.CurrentMapNodeId == node.NodeId;
+    }
+
     /// <summary>构建地图按钮和连线；layer/index 只作为稳定 UI 坐标回调参数。</summary>
     public static void BuildInteractiveMap(Control parent, float offsetX, float offsetY,
         System.Action<int, int> onNodePressed)
@@ -106,7 +123,7 @@ public static class MapRenderer
                 btn.AddThemeFontSizeOverride("font_size", FontSize);
 
                 bool accessible = IsNodeAccessible(node);
-                bool isCurrent = gm.CurrentMapNodeId == node.NodeId;
+                bool isCurrent = IsNodeCurrentForDisplay(gm, node);
                 ApplyStyle(btn, node, accessible, isCurrent, gm.VisitedNodeIds.Contains(node.NodeId));
                 int capturedLayer = node.LayerIndex;
                 int capturedIndex = node.LayerOrder;

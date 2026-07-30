@@ -18,12 +18,17 @@ public static class OverlayCoordinator
     // CardReward child without cancelling it, then reveal the unchanged child on close.
     public const int MapCoverZIndex = 490;
     public const int MapCoverZIndexMax = 499;
-    public const int TransitionAndErrorZIndex = 500;
-    public const int TransitionAndErrorZIndexMax = 509;
+    // Settings is a global temporary modal: it covers the complete host viewport, including the
+    // visible TopBar. Its own panel and close/Esc actions are the only active inputs while open.
+    public const int GlobalSettingsZIndex = 500;
+    public const int GlobalSettingsZIndexMax = 509;
+    public const int TransitionAndErrorZIndex = 510;
+    public const int TransitionAndErrorZIndexMax = 519;
 
     private static Node _mapOverlay;
     private static Node _deckOverlay;
     private static Node _settingsOverlay;
+    private static System.Action _closeSettings;
     private static Node _victoryModal;
     private static Node _cardRewardOverlay;
 
@@ -34,24 +39,28 @@ public static class OverlayCoordinator
     public static bool TryPrepareMap(out string error)
     {
         error = "";
+        if (!TryCloseGlobalSettings(out error))
+            return false;
+
         CloseAndClear(ref _deckOverlay);
-        CloseAndClear(ref _settingsOverlay);
         return true;
     }
 
     /// <summary>
-    /// Prepares a utility overlay. TopBar utilities remain globally available during victory;
-    /// they close the optional CardReward child but retain the victory page below.
+    /// Prepares a utility overlay. When settings is not active, TopBar utilities remain available
+    /// during victory; they close the optional CardReward child but retain the victory page below.
     /// </summary>
     public static bool TryPrepareUtilityOverlay(string overlayName, out string error)
     {
         error = "";
+        if (!TryCloseGlobalSettings(out error))
+            return false;
+
         if (!TryDismissCardRewardForGlobalEntry(out error))
             return false;
 
         CloseAndClear(ref _mapOverlay);
         CloseAndClear(ref _deckOverlay);
-        CloseAndClear(ref _settingsOverlay);
         return true;
     }
 
@@ -61,8 +70,51 @@ public static class OverlayCoordinator
     /// <summary>Registers the deck overlay after mutual-exclusion checks.</summary>
     public static void RegisterDeck(Node overlay) => _deckOverlay = overlay;
 
-    /// <summary>Registers the settings modal after mutual-exclusion checks.</summary>
-    public static void RegisterSettings(Node overlay) => _settingsOverlay = overlay;
+    /// <summary>
+    /// Registers the shared settings instance on the global semantic plane. Settings is not part
+    /// of the page map/deck mutual-exclusion group, so registration deliberately leaves all lower
+    /// overlay instances alive. The close callback is owned by SettingsHelper and is used when a
+    /// different TopBar entry needs to close settings before taking its own action.
+    /// </summary>
+    public static bool TryPrepareGlobalSettings(Node overlay, System.Action closeCallback, out string error)
+    {
+        error = "";
+        if (!IsAlive(overlay))
+        {
+            error = "全局设置实例无效。";
+            GD.PrintErr($"[OverlayCoordinator] {error}");
+            return false;
+        }
+
+        if (closeCallback == null)
+        {
+            error = "全局设置缺少可追踪的关闭回调。";
+            GD.PrintErr($"[OverlayCoordinator] {error}");
+            return false;
+        }
+
+        if (IsAlive(_settingsOverlay) && !SameInstance(_settingsOverlay, overlay))
+        {
+            error = "已有全局设置实例，拒绝重复装配。";
+            GD.PrintErr($"[OverlayCoordinator] {error}");
+            return false;
+        }
+
+        if (overlay is CanvasItem canvasItem)
+            canvasItem.ZIndex = GlobalSettingsZIndex;
+
+        _settingsOverlay = overlay;
+        _closeSettings = closeCallback;
+        return true;
+    }
+
+    /// <summary>True while a higher content/modal overlay owns Battle input.</summary>
+    public static bool IsBattleInputBlocked =>
+        IsAlive(_settingsOverlay) ||
+        IsAlive(_mapOverlay) ||
+        IsAlive(_deckOverlay) ||
+        IsAlive(_victoryModal) ||
+        IsAlive(_cardRewardOverlay);
 
     /// <summary>Registers the full-screen victory input barrier and closes normal utility overlays.</summary>
     public static bool TryRegisterVictory(Node modal, out string error)
@@ -75,9 +127,10 @@ public static class OverlayCoordinator
             return false;
         }
 
+        if (!TryCloseGlobalSettings(out error))
+            return false;
         CloseAndClear(ref _mapOverlay);
         CloseAndClear(ref _deckOverlay);
-        CloseAndClear(ref _settingsOverlay);
         if (!TryDismissCardRewardForGlobalEntry(out error))
             return false;
         _victoryModal = modal;
@@ -112,9 +165,46 @@ public static class OverlayCoordinator
         // ownership cleanup reliable when CardReward is dismissed through a global TopBar action.
         if (SameInstance(_mapOverlay, overlay)) _mapOverlay = null;
         if (SameInstance(_deckOverlay, overlay)) _deckOverlay = null;
-        if (SameInstance(_settingsOverlay, overlay)) _settingsOverlay = null;
+        if (SameInstance(_settingsOverlay, overlay))
+        {
+            _settingsOverlay = null;
+            _closeSettings = null;
+        }
         if (SameInstance(_victoryModal, overlay)) _victoryModal = null;
         if (SameInstance(_cardRewardOverlay, overlay)) _cardRewardOverlay = null;
+    }
+
+    /// <summary>
+    /// Closes settings through its owner callback and verifies that ownership was released. This
+    /// keeps TopBar map/deck actions from QueueFree-ing the dialog behind SettingsHelper's back.
+    /// </summary>
+    private static bool TryCloseGlobalSettings(out string error)
+    {
+        error = "";
+        if (!IsAlive(_settingsOverlay))
+        {
+            _settingsOverlay = null;
+            _closeSettings = null;
+            return true;
+        }
+
+        if (_closeSettings == null)
+        {
+            error = "全局设置实例缺少关闭负责人。";
+            GD.PrintErr($"[OverlayCoordinator] {error}");
+            return false;
+        }
+
+        var close = _closeSettings;
+        close();
+        if (IsAlive(_settingsOverlay))
+        {
+            error = "全局设置关闭负责人未释放当前实例。";
+            GD.PrintErr($"[OverlayCoordinator] {error}");
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>

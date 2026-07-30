@@ -2856,3 +2856,50 @@ Title → CharacterSelect → Map → (道痕 overlay) → Map → Battle → Ca
 
 - 当前工作区没有 `ffprobe.exe`，媒体流与参数使用 FFmpeg 7.1 的输入/解码报告及显式 stream map 验证；未伪造 ffprobe 结果。
 - 未执行持续窗口播放和视觉验收；需用户确认标题页显示倒放视频、循环衔接、菜单可操作及 BGM/设置行为。开发完成，待用户验收。
+
+---
+
+# 2026-07-30 | BUGFIX-OVERLAY-CARD-INPUT-001 阶段 B：设置层与卡牌指针输入
+
+## 根因与变更
+
+- `OverlayCoordinator` 新增集中 `GlobalSettings` 语义层。设置打开时保留地图、套牌、胜利页和卡牌奖励实例；关闭设置或从其他 TopBar 工具入口切换时通过统一回调处理，不再由设置入口清理下层 overlay。
+- `SettingsHelper` 改用专用设置层装配，并在场景退出时注销引用，保持同一设置实例的可恢复关闭路径。
+- `BattleController` 将左键 Press、拖拽、Release、右键 Cancel 收口到单一指针手势状态；Release 不再依赖 `CardButton` 热区，右键取消会吞掉原左键 Release，新的左键 Press 才能开始下一次交互。敌方目标判定改为读取实际敌人控件的全局矩形。
+- 新增 `CardPointerGestureSelfCheck`，并接入现有 `OverlayCoordinatorSelfCheck`。
+
+## 修改文件
+
+- `scripts/UI/OverlayCoordinator.cs`
+- `scripts/UI/SettingsHelper.cs`
+- `scripts/UI/BattleController.cs`
+- `scripts/Core/OverlayCoordinatorSelfCheck.cs`
+- `scripts/Core/CardPointerGestureSelfCheck.cs`
+- `scripts/Core/CardPointerGestureSelfCheck.cs.uid`
+- `docs/开发记录-code.md`
+
+## 验证
+
+- 隔离 `APPDATA/LOCALAPPDATA`、复用本机 NuGet 缓存执行 `dotnet build .\AfterHongHuang.csproj -p:NuGetAudit=false`：退出码 0，0 警告、0 错误。
+- Godot 4.7 Mono Console 执行 `--headless --editor --path . --quit` 与 `--headless --path . --quit`：均退出码 0。
+- 自检包含 GlobalSettings 层级、设置打开/关闭保留下层实例、其他 TopBar 入口先关闭设置，以及合法/非法 Release、右键取消吞 Release、新 Press 恢复；`CardPointerGestureSelfCheck` 与 `OverlayCoordinatorSelfCheck` 均输出 PASS。
+- 聚焦扫描确认无固定敌人矩形 `EnemyPortraitCenter`、具体敌人/卡牌/内容 ID分支；`git diff --check` 通过。
+
+## 定向返工：地图已开时的 TopBar toggle 顺序
+
+- 根因：`NodePageNavigationCoordinator.TryToggleMap` 原先在 `IsOverlayAlive()` 分支直接关闭地图，绕过了 `OverlayCoordinator.TryPrepareMap` 的 GlobalSettings 关闭负责人。
+- 修复：生产 toggle 现在始终先执行集中地图准备，再按已有地图状态关闭或进入打开流程；Battle、Lingmai、Shop 共用同一实现，未复制页面逻辑。
+- 自检：`NodePageNavigationSelfCheck` 增加真实 toggle 顺序的聚焦证明，验证已有地图分支先关闭 GlobalSettings，再关闭地图，不重建地图、不触发路由。
+
+## 限制与风险
+
+- 未执行用户窗口点击/拖拽复测；仍需在实际窗口确认设置覆盖地图/胜利/CardReward 时实例恢复、TopBar 可用，以及卡牌拖出按钮热区后的合法/非法释放和右键取消体验。headless 不能替代窗口输入验证。
+- 状态：开发完成，待用户窗口验收。
+
+### 2026-07-30 合并返工：全屏设置、地图局部输入、放弃本局与卡牌事务
+
+- 设置改为全视口 GlobalSettings 语义层：scrim 覆盖包括 TopBar 在内的完整 viewport，设置内容、右上角关闭和 Esc 保留输入，关闭后不销毁下层地图/胜利/CardReward 实例；新增游戏内“返回主菜单”意图，由 `GameManager.TryAbandonRunToTitle` 清理当前局临时状态并路由标题，不提交奖励、节点结果或路线。
+- `MapOverlayController` 移除地图滚轮/拖拽的全局 `_Input`，改由地图局部交互区域及节点控件接收 `GuiInput`，保留短按/拖拽阈值并在释放、离开、关闭和退树时清理手势；`MapRenderer` 的当前节点显示优先读取活动节点生命周期，未提前推进 `CurrentMapNodeId`。
+- `GameManager.PlayCard` 在扣灵力前完整校验冻结的 `ResolvedCardExecution`；成功后使用同一冻结结果提交，后续失败恢复战斗状态、牌区、日志 trace 与最近解析对象；真实过期计划仍零副作用拒绝。`CardExecutionC7SelfCheck` 覆盖非零费敌方目标、自身、无目标和 stale plan。
+- 直接相关聚焦自检通过：`OverlayCoordinatorSelfCheck`、`CardPointerGestureSelfCheck`、`NodePageNavigationSelfCheck`、`CardExecutionC7SelfCheck` 及既有 MapGraph 500-seed 自检。隔离 NuGet 缓存 Debug/Release 构建均为 0 警告/0 错误，Godot player/editor headless 退出码均为 0；player 退出时仍有项目既有 4 个 ObjectDB 泄漏和 2 个资源占用警告，未宣称无泄漏。
+- 未做用户窗口输入/视觉复测；需确认全屏设置确实阻断 TopBar、地图局部滚轮/拖拽、放弃本局返回标题及三类非零费卡牌实机行为。状态：开发完成，待用户窗口验收。

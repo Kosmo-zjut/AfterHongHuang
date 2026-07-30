@@ -54,6 +54,7 @@ public partial class BattleController : Control
     // ---- 选中卡牌状态 ----
     private CardButton _selectedCardBtn;
     private ResolvedCardExecution _selectedCardExecution;
+    private readonly PointerGestureState<CardButton> _pointerGesture = new();
     private bool _arrowVisible;
     private Vector2 _arrowTarget;
     private TargetArrowOverlay _targetArrowOverlay;
@@ -76,9 +77,6 @@ public partial class BattleController : Control
     private NodePageNavigationCoordinator _nodeNavigation;
 
     // ---- 玩家区域参数（供箭头使用）----
-    private Vector2 PlayerPortraitCenter => new(220f, 370f);
-    private Vector2 EnemyPortraitCenter => new(1780f, 370f);
-
     public override void _Ready()
     {
         _handLayoutProfile ??= new HandLayoutProfile();
@@ -156,7 +154,7 @@ public partial class BattleController : Control
 
     public override void _Process(double delta)
     {
-        if (IsVictoryModalActive)
+        if (OverlayCoordinator.IsBattleInputBlocked)
         {
             if (_arrowVisible)
                 HideTargetArrow();
@@ -169,7 +167,7 @@ public partial class BattleController : Control
         }
         else if (_selectedCardBtn != null && _selectedCardBtn.Card.Info is CardInfo heldInfo && IsAutoReleaseCard(heldInfo))
         {
-            _selectedCardBtn.FollowMouse();
+            _selectedCardBtn.FollowMouse(GetGlobalMousePosition());
             if (_arrowVisible)
                 HideTargetArrow();
         }
@@ -189,22 +187,50 @@ public partial class BattleController : Control
     /// </summary>
     public override void _Input(InputEvent @event)
     {
-        if (IsVictoryModalActive)
+        if (OverlayCoordinator.IsBattleInputBlocked)
             return;
 
-        if (@event is not InputEventMouseButton mouseButton ||
-            mouseButton.ButtonIndex != MouseButton.Right ||
-            !mouseButton.Pressed)
-            return;
-
-        bool hadInteraction = _selectedCardBtn != null || _arrowVisible;
-        foreach (var cardButton in _cardButtons)
-            hadInteraction |= cardButton.IsInteracting;
-
-        CancelCardInteraction();
-        if (hadInteraction)
+        if (@event is InputEventMouseButton mouseButton &&
+            mouseButton.ButtonIndex == MouseButton.Right &&
+            mouseButton.Pressed)
         {
-            AppendLog("[取消] 已取消当前卡牌交互");
+            bool hadInteraction = _selectedCardBtn != null || _arrowVisible ||
+                _pointerGesture.IsActive;
+            if (_pointerGesture.IsActive)
+                _pointerGesture.Cancel();
+
+            foreach (var cardButton in _cardButtons)
+                hadInteraction |= cardButton.IsInteracting;
+
+            CancelCardInteraction();
+            if (hadInteraction)
+            {
+                AppendLog("[取消] 已取消当前卡牌交互");
+                GetViewport().SetInputAsHandled();
+            }
+            return;
+        }
+
+        if (_pointerGesture.IsActive && @event is InputEventMouseMotion motion)
+        {
+            HandlePointerMotion(motion.GlobalPosition);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (_pointerGesture.IsActive &&
+            @event is InputEventMouseButton pointerButton &&
+            pointerButton.ButtonIndex == MouseButton.Left)
+        {
+            if (pointerButton.Pressed)
+            {
+                // A cancelled/active physical gesture owns the pointer until its original
+                // release. Do not let a second press be interpreted as a new card action.
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            HandlePointerRelease(pointerButton.GlobalPosition);
             GetViewport().SetInputAsHandled();
         }
     }
@@ -320,15 +346,7 @@ public partial class BattleController : Control
 
     public override void _GuiInput(InputEvent @event)
     {
-        if (_popupShowing) return;
-
-        // 右键 / 点空白 → 取消选中
-        if (@event is InputEventMouseButton mb &&
-            mb.ButtonIndex == MouseButton.Right && mb.Pressed)
-        {
-            CancelCardInteraction();
-            return;
-        }
+        if (OverlayCoordinator.IsBattleInputBlocked) return;
 
         if (@event is InputEventMouseButton mb2 &&
             mb2.ButtonIndex == MouseButton.Left && mb2.Pressed)
@@ -338,8 +356,7 @@ public partial class BattleController : Control
             // 选中卡牌 + 点敌人区域 → 打出目标型卡牌
             if (_selectedCardBtn != null && _selectedCardBtn.Card.Info is CardInfo info && info.TargetMode == CardTargetMode.Enemy)
             {
-                Rect2 enemyZone = new(EnemyPortraitCenter - new Vector2(140, 210), new Vector2(280, 420));
-                if (enemyZone.HasPoint(pos))
+                if (TryGetEnemyTargetRect(out var enemyZone) && enemyZone.HasPoint(pos))
                 {
                     PlaySelectedCard();
                     return;
@@ -361,6 +378,72 @@ public partial class BattleController : Control
             // 点击非目标区域 → 取消选中
             DeselectCard();
         }
+    }
+
+    private void OnCardPointerPressed(CardButton cardButton, Vector2 globalPosition)
+    {
+        if (_popupShowing || !_pointerGesture.TryBegin(cardButton, globalPosition))
+        {
+            cardButton.ReturnToRest();
+        }
+    }
+
+    private void HandlePointerMotion(Vector2 globalPosition)
+    {
+        var cardButton = _pointerGesture.Owner;
+        if (cardButton == null || !GodotObject.IsInstanceValid(cardButton))
+        {
+            _pointerGesture.Reset();
+            return;
+        }
+
+        if (_pointerGesture.TryBeginDrag(globalPosition, _handLayoutProfile.DragThreshold))
+        {
+            cardButton.BeginPointerDrag();
+            OnCardDragStarted(cardButton);
+            if (!_pointerGesture.IsActive || _pointerGesture.IsCancelled ||
+                _selectedCardBtn != cardButton)
+            {
+                _pointerGesture.Cancel();
+                cardButton.ReturnToRest();
+                return;
+            }
+        }
+
+        if (_pointerGesture.IsDragging && !_pointerGesture.IsCancelled)
+            cardButton.UpdatePointerDrag(globalPosition);
+    }
+
+    private void HandlePointerRelease(Vector2 globalPosition)
+    {
+        var cardButton = _pointerGesture.Owner;
+        var releaseKind = _pointerGesture.Release(globalPosition);
+        if (cardButton == null || !GodotObject.IsInstanceValid(cardButton))
+            return;
+
+        if (releaseKind == PointerReleaseKind.Cancelled)
+        {
+            cardButton.ReturnToRest();
+            return;
+        }
+
+        cardButton.CompletePointerRelease();
+        if (releaseKind == PointerReleaseKind.Dragged)
+            OnCardDragEnded(cardButton, globalPosition);
+        else if (releaseKind == PointerReleaseKind.Click)
+            OnCardSelected(cardButton);
+    }
+
+    private bool TryGetEnemyTargetRect(out Rect2 targetRect)
+    {
+        if (_enemyPortrait == null || !GodotObject.IsInstanceValid(_enemyPortrait))
+        {
+            targetRect = default;
+            return false;
+        }
+
+        targetRect = _enemyPortrait.GetGlobalRect();
+        return targetRect.Size.X > 0.0f && targetRect.Size.Y > 0.0f;
     }
 
     // ==================== 背景 ====================
@@ -700,6 +783,7 @@ public partial class BattleController : Control
 
     private void RefreshHandUI()
     {
+        _pointerGesture.Reset();
         foreach (var btn in _cardButtons)
         {
             btn.Visible = false;
@@ -716,10 +800,7 @@ public partial class BattleController : Control
         {
             var btn = new CardButton(hand[i], _handLayoutProfile);
             btn.ApplyLayout(layouts[i], _handArea.GlobalPosition);
-            btn.OnCardSelected += OnCardSelected;
-            btn.OnCardDragStarted += OnCardDragStarted;
-            btn.OnCardDragEnded += OnCardDragEnded;
-            btn.OnCardCanceled += OnCardCanceled;
+            btn.OnPointerPressed += OnCardPointerPressed;
             _handArea.AddChild(btn);
             _cardButtons.Add(btn);
         }
@@ -827,15 +908,6 @@ public partial class BattleController : Control
         DeselectCard();
     }
 
-    private void OnCardCanceled(CardButton cardBtn)
-    {
-        if (_selectedCardBtn == cardBtn)
-        {
-            AppendLog($"[取消] {cardBtn.Card.Info.Name}");
-            DeselectCard();
-        }
-    }
-
     private void PlaySelectedCard()
     {
         if (_selectedCardBtn == null) return;
@@ -864,8 +936,7 @@ public partial class BattleController : Control
     {
         if (info.TargetMode == CardTargetMode.Enemy)
         {
-            Rect2 enemyZone = new(EnemyPortraitCenter - new Vector2(140, 210), new Vector2(280, 420));
-            return enemyZone.HasPoint(globalPosition);
+            return TryGetEnemyTargetRect(out var enemyZone) && enemyZone.HasPoint(globalPosition);
         }
 
         return false;
@@ -1324,6 +1395,80 @@ public partial class BattleController : Control
     }
 }
 
+internal enum PointerReleaseKind
+{
+    None,
+    Click,
+    Dragged,
+    Cancelled,
+}
+
+/// <summary>
+/// Owns one physical left-button gesture from press to release/cancel. Keeping this state outside
+/// CardButton lets BattleController consume release/motion events after the pointer leaves a card.
+/// </summary>
+internal sealed class PointerGestureState<T> where T : class
+{
+    public T Owner { get; private set; }
+    public bool IsActive => Owner != null;
+    public bool IsDragging { get; private set; }
+    public bool IsCancelled { get; private set; }
+    private Vector2 _pressPosition;
+
+    public bool TryBegin(T owner, Vector2 pressPosition)
+    {
+        if (owner == null || IsActive)
+            return false;
+
+        Owner = owner;
+        _pressPosition = pressPosition;
+        IsDragging = false;
+        IsCancelled = false;
+        return true;
+    }
+
+    public bool TryBeginDrag(Vector2 globalPosition, float threshold)
+    {
+        if (!IsActive || IsCancelled || IsDragging)
+            return false;
+
+        if (_pressPosition.DistanceTo(globalPosition) < threshold)
+            return false;
+
+        IsDragging = true;
+        return true;
+    }
+
+    public bool Cancel()
+    {
+        if (!IsActive)
+            return false;
+
+        IsCancelled = true;
+        return true;
+    }
+
+    public PointerReleaseKind Release(Vector2 globalPosition)
+    {
+        if (!IsActive)
+            return PointerReleaseKind.None;
+
+        PointerReleaseKind result = IsCancelled
+            ? PointerReleaseKind.Cancelled
+            : IsDragging ? PointerReleaseKind.Dragged : PointerReleaseKind.Click;
+        Reset();
+        return result;
+    }
+
+    public void Reset()
+    {
+        Owner = null;
+        IsDragging = false;
+        IsCancelled = false;
+        _pressPosition = default;
+    }
+}
+
 /// <summary>
 /// 高层攻击箭头绘制层。独立于 BattleController 根节点绘制，避免箭头被手牌、背景或立绘层级盖住。
 /// </summary>
@@ -1399,10 +1544,7 @@ public partial class TargetArrowOverlay : Control
 public partial class CardButton : Control
 {
     public CardRuntime Card { get; private set; }
-    public System.Action<CardButton> OnCardSelected;
-    public System.Action<CardButton> OnCardDragStarted;
-    public System.Action<CardButton, Vector2> OnCardDragEnded;
-    public System.Action<CardButton> OnCardCanceled;
+    public System.Action<CardButton, Vector2> OnPointerPressed;
     public bool IsInteracting => _selected || _pressing || _dragging;
 
     private bool _selected;
@@ -1417,7 +1559,6 @@ public partial class CardButton : Control
     private Vector2 _restPos;
     private float _restRotation;
     private int _restZIndex;
-    private Vector2 _pressGlobalPosition;
 
     public CardButton(CardRuntime card, HandLayoutProfile layoutProfile)
     {
@@ -1500,66 +1641,35 @@ public partial class CardButton : Control
             {
                 _pressing = true;
                 _dragging = false;
-                _pressGlobalPosition = GetGlobalMousePosition();
+                OnPointerPressed?.Invoke(this, GetGlobalMousePosition());
                 AcceptEvent();
-                return;
             }
+        }
+    }
 
-            if (_dragging)
-            {
-                _pressing = false;
-                _dragging = false;
-                OnCardDragEnded?.Invoke(this, GetGlobalMousePosition());
-                AcceptEvent();
-                return;
-            }
+    public void BeginPointerDrag()
+    {
+        _dragging = true;
+        _hovered = false;
+        _selected = true;
+        ApplyDragVisual();
+    }
 
-            _pressing = false;
-            OnCardSelected?.Invoke(this);
-            AcceptEvent();
+    public void UpdatePointerDrag(Vector2 globalPosition)
+    {
+        if (!_dragging)
             return;
-        }
 
-        if (@event is InputEventMouseButton mbRight &&
-            mbRight.ButtonIndex == MouseButton.Right &&
-            mbRight.Pressed &&
-            (_pressing || _dragging))
-        {
-            _pressing = false;
-            _dragging = false;
-            ReturnToRest();
-            OnCardCanceled?.Invoke(this);
-            AcceptEvent();
-            return;
-        }
+        if (Card.Info.TargetMode == CardTargetMode.Enemy)
+            ApplyEnemyTargetVisual();
+        else
+            FollowMouse(globalPosition);
+    }
 
-        if (@event is InputEventMouseMotion)
-        {
-            if (!_pressing && !_dragging) return;
-
-            Vector2 mouseGlobal = GetGlobalMousePosition();
-            if (!_dragging && mouseGlobal.DistanceTo(_pressGlobalPosition) >= _layoutProfile.DragThreshold)
-            {
-                _dragging = true;
-                _hovered = false;
-                _selected = true;
-                ApplyDragVisual();
-                OnCardDragStarted?.Invoke(this);
-            }
-
-            if (_dragging)
-            {
-                if (Card.Info.TargetMode == CardTargetMode.Enemy)
-                {
-                    ApplyEnemyTargetVisual();
-                }
-                else
-                {
-                    FollowMouse();
-                }
-                AcceptEvent();
-            }
-        }
+    public void CompletePointerRelease()
+    {
+        _pressing = false;
+        _dragging = false;
     }
 
     public void ReturnToRest()
@@ -1601,7 +1711,12 @@ public partial class CardButton : Control
 
     public void FollowMouse()
     {
-        GlobalPosition = GetGlobalMousePosition() + _layoutProfile.HeldFollowOffset - Size / 2f;
+        FollowMouse(GetGlobalMousePosition());
+    }
+
+    public void FollowMouse(Vector2 globalPosition)
+    {
+        GlobalPosition = globalPosition + _layoutProfile.HeldFollowOffset - Size / 2f;
         RotationDegrees = 0f;
         Scale = Vector2.One * _layoutProfile.SelectedScale;
         ZIndex = _layoutProfile.HeldZIndex;

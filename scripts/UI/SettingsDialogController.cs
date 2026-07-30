@@ -9,6 +9,7 @@ using System.Collections.Generic;
 public partial class SettingsDialogController : Control
 {
     public event Action CloseRequestedByUser;
+    public event Action AbandonRunRequested;
 
     private static readonly AudioChannel[] ExpectedChannels =
     {
@@ -23,6 +24,9 @@ public partial class SettingsDialogController : Control
     private Label _resolutionStatusLabel;
     private Label _audioStatusLabel;
     private Button _closeButton;
+    private Control _navigationFooter;
+    private Label _returnToMainMenuHint;
+    private Button _returnToMainMenuButton;
     private VolumeRowController[] _volumeRows;
 
     /// <summary>Validates the scene assembly and wires controls exactly once before display.</summary>
@@ -39,6 +43,9 @@ public partial class SettingsDialogController : Control
         _resolutionStatusLabel = GetNodeOrNull<Label>("%ResolutionStatus");
         _audioStatusLabel = GetNodeOrNull<Label>("%AudioStatus");
         _closeButton = GetNodeOrNull<Button>("%CloseButton");
+        _navigationFooter = GetNodeOrNull<Control>("%NavigationFooter");
+        _returnToMainMenuHint = GetNodeOrNull<Label>("%ReturnToMainMenuHint");
+        _returnToMainMenuButton = GetNodeOrNull<Button>("%ReturnToMainMenuButton");
         _volumeRows = new[]
         {
             GetNodeOrNull<VolumeRowController>("%MasterVolume"),
@@ -47,7 +54,8 @@ public partial class SettingsDialogController : Control
         };
 
         if (_contentScrim == null || _resolutionOptions == null || _resolutionStatusLabel == null ||
-            _audioStatusLabel == null || _closeButton == null || _volumeRows[0] == null ||
+            _audioStatusLabel == null || _closeButton == null || _navigationFooter == null ||
+            _returnToMainMenuHint == null || _returnToMainMenuButton == null || _volumeRows[0] == null ||
             _volumeRows[1] == null || _volumeRows[2] == null)
         {
             error = "设置场景缺少必要的控件引用。";
@@ -72,6 +80,7 @@ public partial class SettingsDialogController : Control
         PopulateResolutionOptions();
         _resolutionOptions.ItemSelected += OnResolutionSelected;
         _closeButton.Pressed += OnCloseRequested;
+        _returnToMainMenuButton.Pressed += OnReturnToMainMenuRequested;
 
         if (AudioSettingsService.Instance != null)
             AudioSettingsService.Instance.SettingsChanged += OnAudioSettingsChanged;
@@ -108,27 +117,39 @@ public partial class SettingsDialogController : Control
 
         _resolutionOptions.ItemSelected -= OnResolutionSelected;
         _closeButton.Pressed -= OnCloseRequested;
+        _returnToMainMenuButton.Pressed -= OnReturnToMainMenuRequested;
         _initialized = false;
     }
 
-    /// <summary>Sets the content barrier boundary supplied by the hosting page.</summary>
-    public bool TrySetContentTopInset(float topInset, out string error)
+    /// <summary>
+    /// Selects the page mode for the shared dialog. The scene is always a full-viewport modal;
+    /// only the in-game abandon action is hidden on the title page.
+    /// </summary>
+    public bool TrySetInGameMode(bool isInGame, out string error)
     {
-        if (_contentScrim == null || !GodotObject.IsInstanceValid(_contentScrim))
+        if (_contentScrim == null || !GodotObject.IsInstanceValid(_contentScrim) ||
+            _contentScrim.MouseFilter != Control.MouseFilterEnum.Stop ||
+            _navigationFooter == null || !GodotObject.IsInstanceValid(_navigationFooter) ||
+            _returnToMainMenuHint == null || !GodotObject.IsInstanceValid(_returnToMainMenuHint) ||
+            _returnToMainMenuButton == null || !GodotObject.IsInstanceValid(_returnToMainMenuButton))
         {
-            error = "设置遮罩缺少内容层引用。";
+            error = "设置场景缺少返回主菜单装配。";
             return false;
         }
 
-        if (!float.IsFinite(topInset) || topInset < 0.0f)
-        {
-            error = $"设置遮罩顶部边界无效：{topInset}。";
-            return false;
-        }
-
-        _contentScrim.OffsetTop = topInset;
+        _navigationFooter.Visible = isInGame;
+        _returnToMainMenuHint.Visible = isInGame;
+        _returnToMainMenuButton.Visible = isInGame;
         error = "";
         return true;
+    }
+
+    /// <summary>Shows a user-visible operation failure without changing persisted settings.</summary>
+    public void ShowOperationError(string error)
+    {
+        _resolutionStatusLabel.Text = $"操作失败：{error}";
+        _resolutionStatusLabel.Visible = true;
+        GD.PrintErr($"[设置] {_resolutionStatusLabel.Text}");
     }
 
     private void PopulateResolutionOptions()
@@ -291,4 +312,6 @@ public partial class SettingsDialogController : Control
     }
 
     private void OnCloseRequested() => CloseRequestedByUser?.Invoke();
+
+    private void OnReturnToMainMenuRequested() => AbandonRunRequested?.Invoke();
 }

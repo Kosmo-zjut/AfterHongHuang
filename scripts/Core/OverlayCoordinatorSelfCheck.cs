@@ -9,6 +9,10 @@ public static class OverlayCoordinatorSelfCheck
             "地图覆盖层必须高于 CardReward，关闭后才能恢复同一奖励状态。");
         Ensure(OverlayCoordinator.CardRewardZIndex > OverlayCoordinator.VictoryZIndex,
             "CardReward 必须压住胜利页面内容，阻断本地继续输入。");
+        Ensure(OverlayCoordinator.GlobalSettingsZIndex > OverlayCoordinator.MapCoverZIndexMax,
+            "GlobalSettings 必须高于地图、CardReward 和胜利内容。");
+        Ensure(OverlayCoordinator.TransitionAndErrorZIndex > OverlayCoordinator.GlobalSettingsZIndexMax,
+            "转场/致命错误平面必须高于 GlobalSettings。");
 
         var nodePage = new Control();
         int mapToggleCount = 0;
@@ -26,7 +30,8 @@ public static class OverlayCoordinatorSelfCheck
         VerifyMapCoverPreservesReward();
         VerifyMapCoverVisuallyOwnsNodeContent();
         VerifyGlobalEntryCancelsReward("套牌", (out string error) => OverlayCoordinator.TryPrepareUtilityOverlay("套牌页面", out error));
-        VerifyGlobalEntryCancelsReward("设置", (out string error) => OverlayCoordinator.TryPrepareUtilityOverlay("设置", out error));
+        VerifyGlobalSettingsStack();
+        CardPointerGestureSelfCheck.Run();
 
         OverlayCoordinator.Unregister(victory);
         victory.Free();
@@ -65,6 +70,47 @@ public static class OverlayCoordinatorSelfCheck
     }
 
     private delegate bool PrepareOverlayAction(out string error);
+
+    /// <summary>
+    /// Proves settings is a global stack entry: lower overlay instances remain alive while it is
+    /// open, and the map prepare path closes settings through its owner before taking ownership.
+    /// </summary>
+    private static void VerifyGlobalSettingsStack()
+    {
+        var map = new Panel();
+        var deck = new Panel();
+        var reward = new Panel();
+        var settings = new Panel();
+        bool settingsClosed = false;
+
+        OverlayCoordinator.RegisterMap(map);
+        OverlayCoordinator.RegisterDeck(deck);
+        Ensure(OverlayCoordinator.TryRegisterCardReward(reward, out var rewardError), rewardError);
+
+        Ensure(OverlayCoordinator.TryPrepareGlobalSettings(settings, () =>
+        {
+            settingsClosed = true;
+            OverlayCoordinator.Unregister(settings);
+            settings.Free();
+        }, out var settingsError), settingsError);
+        Ensure(settings.ZIndex == OverlayCoordinator.GlobalSettingsZIndex,
+            "GlobalSettings 实例必须由协调器装配到集中语义平面。");
+        Ensure(GodotObject.IsInstanceValid(map) && GodotObject.IsInstanceValid(deck) &&
+            GodotObject.IsInstanceValid(reward),
+            "打开设置不得销毁地图、套牌或 CardReward 实例。");
+
+        Ensure(OverlayCoordinator.TryPrepareMap(out var mapError), $"设置打开时地图入口关闭设置失败：{mapError}");
+        Ensure(settingsClosed, "其它 TopBar 入口未通过设置负责人关闭 GlobalSettings。");
+        Ensure(GodotObject.IsInstanceValid(map) && GodotObject.IsInstanceValid(reward),
+            "关闭设置并打开地图后，原地图/CardReward 实例必须保留。");
+
+        OverlayCoordinator.Unregister(map);
+        OverlayCoordinator.Unregister(reward);
+        map.Free();
+        reward.Free();
+        if (GodotObject.IsInstanceValid(deck))
+            deck.Free();
+    }
 
     /// <summary>
     /// Map opening is intentionally different from Deck/Settings: it covers a CardReward child
